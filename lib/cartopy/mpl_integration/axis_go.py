@@ -18,8 +18,8 @@ def add_ticks(path, source_transform, target_transform):
     import matplotlib.ticker as mticker
     ticker = mticker.MaxNLocator(5)
     # option to do regularly spaced ticks on the line instead.
-    xticks = ticker._get_locations(transformed[..., 0].min(), transformed[..., 0].max())
-    yticks = ticker._get_locations(transformed[..., 1].min(), transformed[..., 1].max())
+    xticks = ticker.tick_values(transformed[..., 0].min(), transformed[..., 0].max())
+    yticks = ticker.tick_values(transformed[..., 1].min(), transformed[..., 1].max())
 
 
     rng = transformed[..., 1].min(), transformed[..., 1].max()
@@ -52,6 +52,9 @@ def add_ticks(path, source_transform, target_transform):
 
 
 if __name__ == '__main__':
+    
+    # NOT ME. YOU SHOULD DELME....
+    
     ax = plt.axes(projection='polar')
     ax = plt.gca()
     r = plt.plot(range(10), range(10))
@@ -65,11 +68,11 @@ if __name__ == '__main__':
     import matplotlib.path as mpath
     import matplotlib.patches as mpatches
 
-    path = mpath.Path(zip([0.15, 0.275, 0.7], [0.3, 0.35, 0.8]))
-    patch = mpatches.PathPatch(path, transform=ax.transAxes, facecolor='none')
-    ax.add_patch(patch)
-
-    add_ticks(patch.get_path(), patch.get_transform(), ax.transData)
+#    path = mpath.Path(zip([0.15, 0.275, 0.7], [0.3, 0.35, 0.8]))
+#    patch = mpatches.PathPatch(path, transform=ax.transAxes, facecolor='none')
+#    ax.add_patch(patch)
+#
+#    add_ticks(patch.get_path(), patch.get_transform(), ax.transData)
 
 
 #    print line_to_desired.transform(coords)
