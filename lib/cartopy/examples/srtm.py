@@ -84,9 +84,43 @@ def hillshade(data, scale=10.0, azdeg=165.0, altdeg=45.0):
     return intensity
 
 
+def main4():
+    ax = plt.axes(projection=ccrs.PlateCarree())
+
+    elev, crs, extent, origin = io_srtm.srtm30(-20, 90)
+    
+    elev = elev[::4, ::4]
+#    elev = np.ma.masked_less_equal(elev, 0, copy=False)
+    elev = elev.astype('float32')
+    use_mpl_light_source = True
+    
+    if use_mpl_light_source:
+        from matplotlib.colors import LightSource
+    
+        ls = LightSource(azdeg=90, altdeg=80,
+                         hsv_min_val=0.6, hsv_min_sat=0.9,
+                         hsv_max_val=0.8, hsv_max_sat=1,
+                         )
+    
+        rgb = ls.shade(elev, plt.get_cmap('Greens', 3))
+    else:
+        import matplotlib.colors as mcolors
+        rgb = set_shade(elev,
+                        cmap=mcolors.ListedColormap([plt.get_cmap('Greens', 3)(0.5)])
+                    )
+        
+    ax.imshow(rgb,
+                extent=extent,
+                transform=crs,
+                origin=origin
+                )
+    plt.show()
+
+
 def main3():
     ax = plt.axes(projection=ccrs.PlateCarree())
 
+    
     elev, crs, extent = io_srtm.srtm_composite(-5, 52, 2, 2)
 
     elev = np.ma.masked_less_equal(elev, 0, copy=False)
@@ -116,6 +150,8 @@ def main3():
 
     x = np.linspace(extent[0], extent[1], elev.shape[0])
     y = np.linspace(extent[2], extent[3], elev.shape[1])
+    
+    
 #
 #    ax.contour(x, y, elev, 100,
 #               linestyles='-',

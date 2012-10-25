@@ -125,6 +125,90 @@ def SRTM3_retrieve(lon, lat, data_dir=None):
 
     return filepath
 
+def srtm30(lon, lat):
+    """
+    Return (elevation, crs, extent, origin) for the given longitude latitude.
+    """
+    # XXX Catch any errors?
+    fname = SRTM30_retrieve(lon, lat)
+    return read_SRTM30(fname)
+
+def read_SRTM30(fh):
+    """
+    Reads the SRTM30 data from the given filename/file handle/zipped filename.
+    
+    SRTM30 DEM specification can be found at
+    http://dds.cr.usgs.gov/srtm/version2_1/SRTM30/srtm30_documentation.pdf
+    
+    TODO: Document return type
+    
+    """
+    fh, fname = fh_getter(fh, needs_filename=True)
+    
+    dtype = numpy.dtype('int16')
+    
+    if fname.endswith('.zip'):
+        from zipfile import ZipFile
+        zfh = ZipFile(fh, 'r')
+        # the filename of the dem in the zip file is the same as the zip file
+        # but in upper case form (without the ".zip")
+        fh = zfh.open(os.path.basename(fname[:-4]).upper(), 'r')
+    
+        elev = numpy.frombuffer(fh.read(), dtype=dtype)
+    else:
+        elev = numpy.fromfile(fh, dtype=dtype)
+    
+    elev.shape = (6000, 4800)
+    
+    fname = os.path.basename(fname.upper())
+    x_dir, x, y_dir, y = fname[0], int(fname[1:4]), fname[4], int(fname[5:7])
+
+    if y_dir == 'S':
+        y *= -1
+    if x_dir == 'W':
+        x *= -1
+
+    # XXX extent may need to be wider by half a pixel
+    # XXX There may be a special case when N90...
+    extent = [x, x+40, y-50, y]
+    
+    # xxx extent may need to be wider by half a pixel
+    return elev, ccrs.PlateCarree(), extent, 'upper'
+
+
+def SRTM30_retrieve(lon, lat, data_dir=None):
+    if data_dir is None:
+        dname = os.path.dirname
+        # be more clever in the data directory so that users can define a setting.
+        data_dir = os.path.join(dname(dname(__file__)), 'data', 'SRTM30')
+    
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+    
+    x = '%s%03d' % ('E' if lon > 0 else 'W', abs(int(lon)))
+    y = '%s%02d' % ('N' if lat > 0 else 'S', abs(int(lat)))
+    x = x.lower()
+    y = y.lower()
+    
+    filename = '{x}{y}.dem.zip'.format(x=x, y=y)
+
+    filepath = os.path.join(data_dir, filename)
+    
+    if not os.path.exists(filepath):
+        import urllib
+        url_template = 'http://dds.cr.usgs.gov/srtm/version2_1/SRTM30/{x}{y}/{fname}'
+        url = url_template.format(x=x, y=y, fname=filename)
+        print 'Downloading: %s' % url
+        _, headers = urllib.urlretrieve (url, filepath)
+        if int(headers['Content-Length']) < 500:
+            os.remove(filepath)
+            raise IOError('The url returned content of less than 500 characters. '
+                          'It is unlikely that the download was successful. Try '
+                          'visiting the following URL to see if it is valid. \n' +  
+                          url)
+        
+    return filepath
+
 
 def _create_srtm3_dict():
     """
@@ -157,3 +241,27 @@ def _create_srtm3_dict():
                 # remove the '.hgt.zip'
                 files[name[:-8]] = url + '/' + name
     return files
+
+
+if __name__ == '__main__':
+
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs    
+
+    fname = '/downloads/w060n40.dem.zip'
+#    fname = SRTM30_retrieve(-60, 40)
+    fname = SRTM30_retrieve(-20, 90)
+    print fname
+
+    elev, crs, extent, origin = read_SRTM30(fname)
+    
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    
+    print extent
+    plt.imshow(elev, cmap='Greens', extent=extent, transform=crs, origin=origin)
+    ax.coastlines()
+    plt.show()
+    
+    
+    
+    

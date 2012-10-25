@@ -694,7 +694,7 @@ class GeoAxes(matplotlib.axes.Axes):
         # put a color patch for background color
         # XXX Should be exactly one path...
         collection = mpatches.PathPatch(path,
-                                        facecolor='w', edgecolor='none', zorder= -1,
+                                        facecolor='w', edgecolor='none', zorder=-100,
                                         transform=sct, clip_on=False,
                                         )
         self.background_patch = collection
