@@ -499,6 +499,7 @@ class GeoAxes(matplotlib.axes.Axes):
 
         r = self.projection.project_geometry(domain_in_crs, crs)
         x1, y1, x2, y2 = r.bounds
+        print x1, y1, x2, y2
         self.set_xlim([x1, x2])
         self.set_ylim([y1, y2])
 

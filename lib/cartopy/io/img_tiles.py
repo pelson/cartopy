@@ -89,13 +89,16 @@ class GoogleTiles(object):
     _subtiles = subtiles
 
     @staticmethod
-    def tile_bbox(prj, x, y, z, lat_extent_at_z0=(-85., 85.),
+    def tile_bbox(prj, x, y, z,
                   bottom_up=True, native=True):
         """
         Returns the x0, x1, y0, y1 bounding box for the given x, y, z
         tile position.
 
         NOTE: This interface is highly liable to change in the future.
+        
+        # atan(sinh(PI)) *180 / PI = 85.05112878
+        
         """
         n = 2 ** z
         assert 0 <= x <= (n - 1), ("Tile's x index is out of range. Upper "
@@ -107,13 +110,17 @@ class GoogleTiles(object):
         # compute the box height in native coordinates for this zoom level
         box_w = 360. / n
 
-        result = prj.transform_points(ccrs.PlateCarree(),
-                                      numpy.array([0., 0]),
-                                      numpy.array(lat_extent_at_z0))
-        y1, y0 = result[:, 1]
+        y0 = 180
         # compute the box height in native coordinates for this zoom level
-        box_h = (y1 - y0) / n
-
+        box_h = -360 / float(n)
+        
+        v = 6378137*numpy.pi
+        box_h = 2*-v / float(n)
+        box_w = 2*v / float(n)
+        x0 = -v
+        y0 = v
+        
+#        box_h = box_w
         # compute the native x & native y extents of the box
     #    x_lower, x_upper = x0 + x*box_w, x0 + (x+1)*box_w
     #    y_lower, y_upper = y0 + y*box_h, y0 + (y+1)*box_h
@@ -123,7 +130,9 @@ class GoogleTiles(object):
         if not bottom_up:
             # n.b. assumes that the projection is symmetric
             n_ys = -1 * n_ys[::-1]
-
+        else:
+            n_ys = n_ys[::-1]
+            
         if native:
             return n_xs, n_ys
         else:
@@ -131,11 +140,11 @@ class GoogleTiles(object):
 
             return b_xs, b_ys
 
-    def tileextent(self, x_y_z):
+    def tileextent(self, x_y_z, native=True):
         x, y, z = x_y_z
         # this was a copy from tiledomain
         prj = ccrs.Mercator()
-        x_lim, y_lim = self.tile_bbox(prj, x, y, z, bottom_up=True)
+        x_lim, y_lim = self.tile_bbox(prj, x, y, z, bottom_up=True, native=native)
 
         return tuple(x_lim) + tuple(y_lim)
 
@@ -184,6 +193,24 @@ class GoogleTiles(object):
         img = img.convert(self.desired_tile_form)
 
         return img, self.tileextent(tile), 'lower'
+
+    @staticmethod
+    def tiles_in_domain(geom, zmin, zmax):
+        """
+        Return all the tiles which lie in the given geometry between ``zmin``
+        zoom and ``zmax`` zoom.
+        
+        """
+        gmt = GoogleTiles()
+        last_z_tiles = [(0, 0, 0)]
+        for current_z in range(1, zmax + 1):
+            current_z_tiles = []
+            for parent_tile in last_z_tiles:
+                for tile in gmt.find_images(geom, current_z, start_tile=parent_tile):
+                    current_z_tiles.append(tile)
+                    if current_z >= zmin:
+                        yield tile 
+            last_z_tiles = current_z_tiles
 
 
 class MapQuestOSM(GoogleTiles):

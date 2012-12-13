@@ -48,18 +48,17 @@ def test_google_wts():
         gt.tileextent((0, 1, 0))
 
     assert_arr_almost(gt.tileextent((0, 0, 0)),
-                      (-180.0, 180.0,
-                       179.02740096396502, -179.02740096396491))
+                      (-180.0, 180.0, -180, 180))
     assert_arr_almost(gt.tileextent((2, 0, 2)),
-                      (0.0, 90.0, 179.02740096396502, 89.513700481982539))
+                      (0.0, 90.0, 90, 180))
     assert_arr_almost(gt.tileextent((0, 2, 2)),
-                      (-180.0, -90.0,
-                       5.6843418860808015e-14, -89.513700481982426))
+                      (-180.0, -90.0, -90, 0))
     assert_arr_almost(gt.tileextent((2, 2, 2)),
-                      (0.0, 90.0,
-                       5.6843418860808015e-14, -89.513700481982426))
-    assert_arr_almost(gt.tileextent((8, 9, 4)), (0.0, 22.5, -22.37842512,
-                      -44.75685024))  # <- zoom 4, contains cape town.
+                      (0.0, 90.0, -90, 0))
+    # check a known tile at x8, y9, z4 (n.b. the tile contains Cape Town)
+    assert_arr_almost(gt.tileextent((8, 9, 4)),
+#                      (0.0, 22.5, -40.97, -21.94))
+                      (0.0, 22.5, -45, -22.5))
 
 
 def test_quadtree_wts():
@@ -91,17 +90,17 @@ def test_quadtree_wts():
         qt.tileextent('4')
 
     assert_arr_almost(qt.tileextent(''),
-                      (-180.0, 180.0, 179.02740096, -179.02740096))
+                      (-180.0, 180.0, -180, 180))
     assert_arr_almost(qt.tileextent(qt.tms_to_quadkey((2, 0, 2), google=True)),
-                      (0.0, 90.0, 179.02740096, 89.51370048))
+                      (0.0, 90.0, 90, 180))
     assert_arr_almost(qt.tileextent(qt.tms_to_quadkey((0, 2, 2), google=True)),
-                      (-180.0, -90.0, 5.68434189e-14, -8.95137005e+01))
+                      (-180.0, -90.0, -90, 0))
     assert_arr_almost(qt.tileextent(qt.tms_to_quadkey((0, 1, 2), google=True)),
-                      (-180.0, -90.0, 8.95137005e+01, 5.68434189e-14))
+                      (-180.0, -90.0, 0, 90))
     assert_arr_almost(qt.tileextent(qt.tms_to_quadkey((2, 2, 2), google=True)),
-                      (0.0, 90.0, 5.68434189e-14, -8.95137005e+01))
+                      (0.0, 90.0, -90, 0))
     assert_arr_almost(qt.tileextent(qt.tms_to_quadkey((8, 9, 4), google=True)),
-                      (0.0, 22.5, -22.37842512, -44.75685024))
+                      (0.0, 22.5, -45, -22.5))
 
 
 if __name__ == '__main__':

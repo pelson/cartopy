@@ -552,12 +552,12 @@ class OSGB(Projection):
 class Mercator(_RectangularProjection):
     def __init__(self, central_longitude=0.0):
         proj4_params = {'proj': 'merc', 'lon_0': central_longitude,
-                        'a': math.degrees(1)}
-        super(Mercator, self).__init__(proj4_params, 180, 180)
+                        'a': 6378137, 'b': 6378137}
+        super(Mercator, self).__init__(proj4_params, 6378137*numpy.pi, 6378137*numpy.pi)
 
     @property
     def threshold(self):
-        return 0.5
+        return 1e3
 
 
 class LambertCylindrical(_RectangularProjection):
