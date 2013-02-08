@@ -26,4 +26,5 @@ install:
 script:
   - mkdir ../test_folder
   - cd ../test_folder
+  - echo "def update_config(config): config['data_dir'] = '$(pwd)/../lib/cartopy/data'" > cartopy_userconfig.py
   - /usr/local/bin/nosetests cartopy --with-doctest -sv
