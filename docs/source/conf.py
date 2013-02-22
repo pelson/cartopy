@@ -351,3 +351,7 @@ plot_formats = (('thumb.png', 20),
                 'pdf'
                 )
 
+############ misc sphinx configs #########
+
+autoclass_content = 'both'
+
