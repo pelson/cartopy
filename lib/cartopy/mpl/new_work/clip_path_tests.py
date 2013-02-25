@@ -7,7 +7,6 @@ import matplotlib.path as mpath
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtrans
-from matplotlib._path import clip_path_to_rect
 import cartopy.crs as ccrs
 
 from cartopy.mpl.clip_path import *

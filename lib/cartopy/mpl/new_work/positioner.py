@@ -19,6 +19,15 @@ import numpy as np
 
 
 def where_on_line(line, x=None, y=None, xy_trans=None):
+    if xy_trans is None or xy_trans == line.get_transform():
+        path_in_xy_trans = line.get_path()
+    else:
+        path_in_xy_trans = (line.get_transform() - xy_trans).transform_path(line.get_path()) 
+
+    return where_on_path(path_in_xy_trans, x=x, y=y)
+
+
+def where_on_path(path_in_xy_trans, x=None, y=None):
     """
     Returns the coordinates (in xy_trans coordinates) of a point which intersects the 
     given x or y coordinate.
@@ -44,11 +53,6 @@ def where_on_line(line, x=None, y=None, xy_trans=None):
     if x is not None != y is not None:
         raise ValueError('X xor Y must be set.')
     
-    if xy_trans is None or xy_trans == line.get_transform():
-        path_in_xy_trans = line.get_path()
-    else:
-        path_in_xy_trans = (line.get_transform() - xy_trans).transform_path(line.get_path()) 
-
     if x is not None:
         x = float(x)
         intersections = np.where(np.diff(np.sign(path_in_xy_trans.vertices[:, 0] - x)) != 0)[0]

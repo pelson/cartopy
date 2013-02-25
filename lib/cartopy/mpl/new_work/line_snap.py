@@ -45,6 +45,42 @@ def snap_line_to_patch(line, patch):
     
 
 
+def horiz_snap_path_to_patch_if_outside(path, patch):
+    """
+    Return a path.
+    
+    Path and patch must be on same CS.
+    
+    """
+    from positioner import where_on_line
+    
+    patch_line = mlines.Line2D([0], [0], transform=patch.get_transform())
+    patch_path = patch.get_path()
+    patch_line.set_xdata(patch_path.vertices[:, 0])
+    patch_line.set_ydata(patch_path.vertices[:, 1])
+    
+    from collections import namedtuple
+    event_mock = namedtuple('event_mock', 'x, y')
+    coords = []
+    for x, y in path.vertices:
+        if patch.get_path().contains_point([x, y]):
+            xy = [x, y]
+        else:
+            
+#            print 'does not contain', tx, ty, patch.get_path()
+            try:
+                xs, ys = where_on_line(patch_line, y=y)
+                ind = np.abs(xs - x).argmin()
+                xy = [xs[ind], ys[ind]]
+            except ValueError:
+                # TODO if this is  the first non-snappable point, interpolate to the end of hte line segment
+                continue
+        coords.append(xy)
+    
+    return coords
+
+
+
 def snap_line_to_patch_if_necessary(line, patch, outline_patch):
     from positioner import where_on_line
     
