@@ -49,9 +49,11 @@ class Gridliner(object):
             the gridlines are drawn in.
 
         * draw_labels
+             ** TO BE REMOVED **
             Label the gridlines at the map edges.
 
         * collection_kwargs
+            ** TO BE REMOVED **
             Dictionary controlling line properties, passed to
             :class:`matplotlib.collections.Collection`.
 
@@ -224,6 +226,7 @@ class Gridliner(object):
                     self._add_gridline_label(y, axis='y', upper_end=upper_end)
 
     def get_domain(self, nx=None, ny=None, background_patch=None):
+        # XXX TO BE MOVED TO GeoAxes (and cached)
         """Returns x_range, y_range"""
         DEBUG = False
 
