@@ -8,7 +8,7 @@ import matplotlib.path as mpath
 import matplotlib.transforms as mtrans
 
 from positioner import where_on_line, where_on_path
-
+from cartopy.mpl.clip_path import clip_path
 
 import cartopy.crs as ccrs
 
@@ -99,7 +99,7 @@ def case2():
     path = line.get_path().interpolated(1000)
     bg = ax.background_patch
     bg_path = bg.get_path()
-    bg_path = bg_path.clip_to_bbox(mtrans.Bbox([[x0, y0], [x1, y1]]))
+    bg_path = clip_path(bg_path, mtrans.Bbox([[x0, y0], [x1, y1]]))
     bg_path = (bg.get_transform() - ax.transAxes).transform_path(bg_path)
     clipped_bg = mpatch.PathPatch(bg_path,
                           transform=ax.transAxes, 
@@ -154,7 +154,7 @@ def case3():
     bg = ax.background_patch
     bg_path = bg.get_path()
     bg_path = (bg.get_transform() - ax.transAxes).transform_path(bg_path)
-    bg_path = bg_path.clip_to_bbox(mtrans.Bbox([[x0, y0], [x1, y1]]))
+    bg_path = clip_path(bg_path, mtrans.Bbox([[x0, y0], [x1, y1]]))
     clipped_bg = mpatch.PathPatch(bg_path,
                           transform=ax.transAxes, 
                           color='red', alpha=0.5, clip_on=False
@@ -183,7 +183,7 @@ def case3():
             r = where_on_path(new, x=tick_loc)
 #            print len(r[0])
             # XXX Sort by furthest from center
-#            plt.plot(r[0][0], r[1][0], 'ob', transform=target_label_cs)
+            plt.plot(r[0][0], r[1][0], 'ob', transform=target_label_cs)
         except ValueError:
 #            print 'not crossed:', tick_loc
             pass
@@ -209,7 +209,7 @@ def case4():
     bg = ax.background_patch
     bg_path = bg.get_path()
     bg_path = (bg.get_transform() - ax.transAxes).transform_path(bg_path)
-    bg_path = bg_path.clip_to_bbox(mtrans.Bbox([[x0, y0], [x1, y1]]))
+    bg_path = clip_path(bg_path, mtrans.Bbox([[x0, y0], [x1, y1]]))
     clipped_bg = mpatch.PathPatch(bg_path,
                           transform=ax.transAxes, 
                           color='red', alpha=0.5, clip_on=False
@@ -224,20 +224,28 @@ def case4():
     for i in np.linspace(0., np.pi * 2, 360):
         x = np.sin(i) * proj.x_limits[1]
         y = np.cos(i) * proj.y_limits[1]
-        p = mpath.Path([[0, 0], [x, y]]).interpolated(20)
-        p = (proj._as_mpl_transform(ax) - ax.transAxes).transform_path(p)
+        opath = mpath.Path([[0, 0], [x, y]]).interpolated(20)
+        p = (proj._as_mpl_transform(ax) - ax.transAxes).transform_path(opath)
         
         try:
-            p = p.clip_to_bbox(ax_bbox)
+            p = clip_path(p, ax_bbox)
         except ValueError:
             continue
 #        print p.vertices.max()
 #        print np.rad2deg(i), len(p.vertices), p.vertices.max() - p.vertices.min()
-        size = (p.vertices[-2, 0] - p.vertices[0, 0]) ** 2 + \
-                (p.vertices[-2, 1] - p.vertices[0, 1]) ** 2
+        size = np.sum(np.abs(np.diff(p.vertices, axis=0)), axis=0)
+#        print size.shape
+        size = np.sum(size**2)
+#        print size.shape
+#        print size
+#        size = (p.vertices[-2, 0] - p.vertices[0, 0]) ** 2 + \
+#                (p.vertices[-2, 1] - p.vertices[0, 1]) ** 2
+
+        opath_clipped_verts = (ax.transAxes - proj._as_mpl_transform(ax)).transform(p.vertices)
+        opath_clipped = mpath.Path(opath_clipped_verts)
 
         path_lengths.append(size)
-        paths.append(p)
+        paths.append(opath_clipped)
         angles.append(np.rad2deg(i))
         
 #        ax.add_patch(mpatch.PathPatch(p, facecolor='none', 
@@ -254,13 +262,14 @@ def case4():
 #    plt.show()
 
     # XXX add a heuristic to pick the most desirable angle
-    longest = max(path_lengths)
+    longest_line_size = max(path_lengths)
     import itertools
     longest = sorted(itertools.izip(*[paths, path_lengths, angles]), 
-                          key=lambda (path, size, angle): ((longest - size) > 0.1))[0]
+                          key=lambda (path, size, angle): ((longest_line_size - size) > 0.1))[0]
     
-    new = (ax.transAxes - target_label_cs._as_mpl_transform(ax)).transform_path(longest[0])
-
+    new_verts = (proj._as_mpl_transform(ax) - target_label_cs._as_mpl_transform(ax)).transform(longest[0].vertices)
+    new = mpath.Path(new_verts)
+    
     ax.add_patch(mpatch.PathPatch(new, facecolor='none', 
                                          edgecolor=cmap(size / 1.0),
                                          transform=target_label_cs, clip_on=False,
@@ -286,5 +295,4 @@ if __name__ == '__main__':
 #    case1()
 #    case2()
 #    case3()
-    
     case4()
