@@ -130,7 +130,7 @@ def path_segments(path, transform=None, remove_nans=False, clip=None,
     return vertices[:-1, :], codes[:-1]
 
 
-def path_to_geos(path):
+def path_to_geos(path, simplify=False):
     """
     Creates a list of Shapely geometric objects from a
     :class:`matplotlib.path.Path`.
@@ -140,6 +140,11 @@ def path_to_geos(path):
     * path
         A :class:`matplotlib.path.Path` instance.
 
+    Kwargs:
+
+    * simplify
+        (bool) whether to use matplotlib's path simplification
+
     Returns:
         A list of :class:`shapely.geometry.polygon.Polygon`,
         :class:`shapely.geometry.linestring.LineString` and/or
@@ -147,7 +152,7 @@ def path_to_geos(path):
 
     """
     # Convert path into numpy array of vertices (and associated codes)
-    path_verts, path_codes = path_segments(path, curves=False)
+    path_verts, path_codes = path_segments(path, curves=False, simplify=simplify)
 
     # Split into subarrays such that each subarray consists of connected
     # line segments based on the start of each one being marked by a

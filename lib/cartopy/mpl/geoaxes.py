@@ -153,7 +153,9 @@ class InterProjectionTransform(mtransforms.Transform):
             return mpath.Path(self.transform(src_path.vertices))
 
         transformed_geoms = []
-        for geom in patch.path_to_geos(src_path):
+        simplify_path = isinstance(self.source_projection, ccrs.Projection)
+
+        for geom in patch.path_to_geos(src_path, simplify=simplify_path):
             transformed_geoms.append(
                 self.target_projection.project_geometry(geom,
                                                         self.source_projection)
