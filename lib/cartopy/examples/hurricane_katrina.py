@@ -31,10 +31,9 @@ def sample_data():
 
 
 def main():
-    ax = plt.axes([0.01, 0.01, 0.98, 0.98], projection=ccrs.PlateCarree())
+    ax = plt.axes([0, 0, 1, 1], projection=ccrs.LambertConformal())
 
-    ax.set_xlim([-125, -66.5])
-    ax.set_ylim([20, 50])
+    ax.set_extent([-125, -66.5, 20, 50])
 
     shapename = 'admin_1_states_provinces_lakes_shp'
     states_shp = shpreader.natural_earth(resolution='110m',
@@ -42,24 +41,24 @@ def main():
 
     lons, lats = sample_data()
 
-    # to get the effect of having just the states without a map "background"
-    # turn off the outline and background patches
+    # To get the effect of having just the states without a map "background"
+    # turn off the outline and background patches.
     ax.background_patch.set_visible(False)
     ax.outline_patch.set_visible(False)
 
     plt.title('US States which intersect the track '
               'of Hurricane Katrina (2005)')
 
-    # turn the lons and lats into a shapely LineString
+    # Turn the lons and lats into a shapely LineString.
     track = sgeom.LineString(zip(lons, lats))
 
-    # buffer the linestring by two degrees (note: this is a non-physical
-    # distance)
+    # Buffer the LineString by two degrees (note: this is a non-physical
+    # distance).
     track_buffer = track.buffer(2)
 
     for state in shpreader.Reader(states_shp).geometries():
-        # pick a default color for the land with a black outline,
-        # this will change if the storm intersects with our track
+        # Pick a default color for the land with a black outline,
+        # this will change if the storm intersects with our track.
         facecolor = [0.9375, 0.9375, 0.859375]
         edgecolor = 'black'
 
@@ -76,7 +75,7 @@ def main():
     ax.add_geometries([track], ccrs.PlateCarree(),
                       facecolor='none')
 
-    # make two proxy artists to add to a legend
+    # Make two proxy artists to add to a legend.
     direct_hit = mpatches.Rectangle((0, 0), 1, 1, facecolor="red")
     within_2_deg = mpatches.Rectangle((0, 0), 1, 1, facecolor="#FF7E00")
     labels = ['State directly intersects\nwith track',
