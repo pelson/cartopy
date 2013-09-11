@@ -45,24 +45,35 @@ plt.draw_if_interactive = new_draw_if_interactive
 
 def new_layer():
     import cartopy.crs as ccrs
-    fig = plt.figure(figsize=(20, 10))
+
+    fig = plt.figure(figsize=(20, 10), dpi=100)
     # Draw the empty figure to create a _cachedRenderer attribute.
     import tempfile
-    fh = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
-    fig.savefig(fh, facecolor='none', edgecolor='none')
-    fname = fh.name
-    print fname
-    fh.close()
+    tmp_dir = tempfile.mkdtemp()
+    img_fname = os.path.join(tmp_dir, 'layer.png')
+    world_fname = os.path.join(tmp_dir, 'layer.pnw')
+    with open(img_fname, 'wb') as fh:
+        fig.savefig(fh, facecolor='none', edgecolor='none')
+    
+    # XXX center coordinates need calculating.
+    world = dict(x_pix_size=360/2000., y_rotation=0, x_rotation=0,
+                 y_pix_size=-180/2000., x_center=0, y_center=90)
+    
+    from cartopy.tests.test_img_nest import _save_world
+    _save_world(world_fname, world)       
+    
+    
     import types
     fig.original_draw = fig.draw
-    fig._qgis_fname = fname
+    fig._qgis_fname = img_fname
+    fig._qgis_world_fname = world_fname
 #    fig._qgis_layer = add_layer(fname)
     def new_draw(self, renderer):
         print 'draw called'
         self.was_drawn = True
         # XXX Handle updating of the qgis layer. (perhaps checksum the image)
         fig.draw = fig.original_draw
-        fig.savefig(fname, facecolor='none', edgecolor='none', dpi=fig.dpi)
+        fig.savefig(img_fname, facecolor='none', edgecolor='none', dpi=fig.dpi)
         fig.draw = fig.new_draw
 #        refresh_layer(self._qgis_layer)
         

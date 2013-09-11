@@ -20,6 +20,7 @@ Provides a collection of sub-packages for loading, saving and retrieving
 various data formats.
 
 """
+from __future__ import absolute_import
 
 import os
 import string

@@ -41,6 +41,8 @@ geometry representation of shapely:
     <class 'shapely.geometry.point.Point'>
 
 """
+from __future__ import absolute_import
+
 import itertools
 import os
 

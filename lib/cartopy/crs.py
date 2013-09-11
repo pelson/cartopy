@@ -21,6 +21,8 @@ The crs module defines Coordinate Reference Systems and the transformations
 between them.
 
 """
+from __future__ import absolute_import
+
 from abc import ABCMeta, abstractproperty
 import math
 import warnings
