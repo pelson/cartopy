@@ -1,4 +1,16 @@
 """
+Adds an interface to allow easy creation of a QGIS layer from a cartopy
+GeoAxes.
+
+The interface makes use of matplotlib, so the matplotlib cartopy interface
+will be familiar:
+
+    import cartopy.crs as ccrs
+    from cartopy.mpl.qgis import cartopy_layer
+
+    with cartopy_layer(name='My first cartopy layer') as ax:
+        ax.coastlines()
+        ax.plot([-115, 45], [-80, 75], transform=ccrs.Geodetic()) 
 
 """
 from __future__ import absolute_import, division
@@ -57,28 +69,6 @@ def disabled_projection_dialogue():
     settings.setValue("/Projections/defaultBehaviour", "useGlobal")
     yield
     settings.setValue("/Projections/defaultBehaviour", old_setting)
-
-
-def refresh_layer(layer):
-    """
-    Refreshes the given raster layer. Currently has issues successfully
-    triggering QGIS to redraw.
-
-    """
-    layer.reload()
-    if hasattr(layer, "setCacheImage"):
-        layer.setCacheImage(None)
-    layer.triggerRepaint()
-
-
-@contextlib.contextmanager
-def frozen_interface():
-    """
-    Freezes the QGIS interface for compute intensive operations.
-    """
-    qgis.utils.iface.mapCanvas().freeze(True)
-    yield
-    qgis.utils.iface.mapCanvas().freeze(False)
 
 
 @contextlib.contextmanager
