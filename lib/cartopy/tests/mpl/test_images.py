@@ -91,8 +91,9 @@ def test_image_nest():
     nest_z0_z1 = ctest_nest.gen_nest()
 
     ax = plt.axes(projection=ccrs.Mercator())
-    ax.set_xlim(-45, 45)
-    ax.set_ylim(-45, 90)
+    shper_globe = ccrs.Globe(semimajor_axis=np.rad2deg(1))
+    spher_merc = ccrs.Mercator(globe=shper_globe)
+    ax.set_extent([-45, 45, -45, 90], spher_merc)
     ax.coastlines()
     ax.add_image(nest_z0_z1, 'aerial z1 test')
 
