@@ -300,19 +300,19 @@ COASTLINE = NaturalEarthFeature('physical', 'coastline', '110m',
 
 
 LAKES = NaturalEarthFeature('physical', 'lakes', '110m',
-                            edgecolor='face',
+                            edgecolor='none',
                             facecolor=COLORS['water'])
 """Small scale (1:110m) natural and artificial lakes."""
 
 
 LAND = NaturalEarthFeature('physical', 'land', '110m',
-                           edgecolor='face',
+                           edgecolor='none',
                            facecolor=COLORS['land'])
 """Small scale (1:110m) land polygons, including major islands."""
 
 
 OCEAN = NaturalEarthFeature('physical', 'ocean', '110m',
-                            edgecolor='face',
+                            edgecolor='none',
                             facecolor=COLORS['water'])
 """Small scale (1:110m) ocean polygons."""
 
