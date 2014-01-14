@@ -339,8 +339,9 @@ class NestedImageCollection(object):
         # XXX Copied from cartopy.io.img_tiles
         if target_z not in self._collections_by_name:
             # TODO: Handle integer depths also?
-            msg = '{!r} is not one of the possible collections.'
-            raise ValueError(msg.format(target_z))
+            msg = ('%s is not one of the possible collections. Must be one of'
+                   ': %s;' % (target_z, ', '.join(self._collections_by_name)))
+            raise ValueError(msg)
 
         tiles = []
         for tile in self.find_images(target_domain, target_z):
