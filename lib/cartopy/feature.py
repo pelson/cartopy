@@ -20,13 +20,12 @@ ax.add_feature().
 
 """
 from abc import ABCMeta, abstractmethod
-import os.path
 
 import numpy as np
-import shapely.geometry
+import shapely.geometry as sgeom
 
 import cartopy.io.shapereader as shapereader
-import cartopy.crs
+import cartopy.crs as ccrs
 
 
 COLORS = {'land': np.array((240, 240, 220)) / 256.,
@@ -108,12 +107,39 @@ class Feature(object):
 
         """
         if extent is not None:
-            extent_geom = shapely.geometry.box(extent[0], extent[2],
-                                               extent[1], extent[3])
+            extent_geom = sgeom.box(extent[0], extent[2],
+                                    extent[1], extent[3])
             return (geom for geom in self.geometries() if
                     extent_geom.intersects(geom))
         else:
             return self.geometries()
+
+
+class FionaFeature(Feature):
+    """
+    Combines the Feature interface with a Fiona handle.
+
+    The handle should remain open for the lifetime of this Feature.
+    
+    """
+    def __init__(self, handle, **kwargs):
+        self.handle = handle
+        # The CRS could be anything else but requires WKT translations...
+        Feature.__init__(self, ccrs.PlateCarree(), **kwargs)
+        self._cache = {}
+
+    def _record_to_geom(self, record):
+        if record['id'] not in self._cache:
+            self._cache[record['id']] = record['geometry'] 
+        return self._cache[record['id']]
+
+    def geometries(self):
+        for fiona_shape in self.handle.filter(bbox=(-5.0, 55.0, 0.0, 60.0)):
+            yield self._record_to_geom(fiona_shape)
+
+    def intersecting_geometries(self, extent):
+        for fiona_shape in self.handle.filter(bbox=extent):
+            yield self._record_to_geom(fiona_shape)
 
 
 class ShapelyFeature(Feature):
@@ -166,7 +192,7 @@ class NaturalEarthFeature(Feature):
             Keyword arguments to be used when drawing this feature.
 
         """
-        super(NaturalEarthFeature, self).__init__(cartopy.crs.PlateCarree(),
+        super(NaturalEarthFeature, self).__init__(ccrs.PlateCarree(),
                                                   **kwargs)
         self.category = category
         self.name = name
@@ -218,7 +244,7 @@ class GSHHSFeature(Feature):
 
     """
     def __init__(self, scale='auto', levels=None, **kwargs):
-        super(GSHHSFeature, self).__init__(cartopy.crs.PlateCarree(), **kwargs)
+        super(GSHHSFeature, self).__init__(ccrs.PlateCarree(), **kwargs)
 
         if scale not in ('auto', 'a', 'coarse', 'c', 'low', 'l',
                          'intermediate', 'i', 'high', 'h', 'full', 'f'):
@@ -274,8 +300,8 @@ class GSHHSFeature(Feature):
             scale = self._scale[0]
 
         if extent is not None:
-            extent_geom = shapely.geometry.box(extent[0], extent[2],
-                                               extent[1], extent[3])
+            extent_geom = sgeom.box(extent[0], extent[2],
+                                    extent[1], extent[3])
         for level in self._levels:
             geoms = GSHHSFeature._geometries_cache.get((scale, level))
             if geoms is None:
