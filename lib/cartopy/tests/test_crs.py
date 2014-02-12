@@ -204,6 +204,63 @@ def test_PlateCarree_shortcut():
         assert_equal(bbox, expected_bboxes)
 
 
+class TestBackFromProj4(unittest.TestCase):
+    cases = ['PlateCarree()',
+             "PlateCarree(globe=Globe(ellipse='airy'))",
+             'PlateCarree(central_longitude=180)',
+             'Mercator(central_longitude=180)',
+             ('TransverseMercator(central_longitude=180, central_latitude=-45'
+              ', false_easting=400, false_northing=-400.1)'),
+             'TransverseMercator()',
+             'OSGB()',
+             'OSNI()',
+             'RotatedPole()',
+             'Stereographic()',
+             'SouthPolarStereo(central_longitude=50)',
+             'NorthPolarStereo()',
+             'Geostationary(satellite_height=500)',
+             'EuroPP()',
+             'LambertConformal()',
+             'LambertConformal(secant_latitudes=(1, -40))',
+             'Geostationary(satellite_height=102.2)',
+             'InterruptedGoodeHomolosine(central_longitude=-200)',
+             'Robinson()',
+             'Mollweide()',
+             'Orthographic(central_latitude=53)',
+             'Gnomonic()',
+             'Miller()',
+             "Mollweide(globe=Globe(ellipse='airy'))",
+             'LambertCylindrical()'
+             ]
+
+    def test_repr(self):
+        # Test that we can construct a CRS's repr and it is equivalent to the
+        # inputed string. Notice that default keywords are automatically
+        # removed if they are superfluous.
+        Globe = ccrs.Globe
+        self.assertIs(Globe, ccrs.Globe)
+
+        for case in self.cases:
+            crs = eval('ccrs.{0}'.format(case))
+            
+            repr_result = repr(crs)
+            self.assertEqual(repr_result, case)
+    
+    def test_proj4_via_CRS(self):
+        # Tests the construction of a CRS from the proj4 string of an existing
+        # CRS, and then checks they are equivalent.
+        Globe = ccrs.Globe
+        self.assertIs(Globe, ccrs.Globe)
+
+        for case in self.cases[:]:
+            crs = eval('ccrs.{0}'.format(case))
+            proj4_str = crs.proj4_init
+            
+            new_crs = ccrs.from_proj4(proj4_str)
+            self.assertEqual(new_crs, crs)
+            self.assertEqual(new_crs.proj4_init, proj4_str)
+
+
 if __name__ == '__main__':
     import nose
     nose.runmodule(argv=['-s', '--with-doctest'], exit=False)

@@ -19,11 +19,6 @@
 __version__ = '0.10.0'
 __document_these__ = ['config']
 
-# Enable shapely performance enhancements
-import shapely.speedups
-if shapely.speedups.available:
-    shapely.speedups.enable()
-
 
 # Configuration
 import os.path
@@ -102,6 +97,12 @@ try:
     _update_config(config)
 except ImportError:
     pass
+
+
+# Enable shapely performance enhancements
+import shapely.speedups
+if shapely.speedups.available:
+    shapely.speedups.enable()
 
 
 # Commonly used sub-modules. Imported here to provide end-user

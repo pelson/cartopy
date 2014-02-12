@@ -1,4 +1,4 @@
-# (C) British Crown Copyright 2011 - 2012, Met Office
+# (C) British Crown Copyright 2011 - 2014, Met Office
 #
 # This file is part of cartopy.
 #
@@ -31,10 +31,11 @@ from shapely.geometry.polygon import LinearRing
 from shapely.prepared import prep
 
 from cartopy._crs import CRS, Geocentric, Geodetic, Globe, PROJ4_RELEASE
+from cartopy._proj4 import _remove_unparameterised, _proj4_str_to_params, from_proj4, _remove_default_params, _compute_unparam, PROJ4_PARAM_TO_NAME
 import cartopy.trace
 
 
-__document_these__ = ['CRS', 'Geocentric', 'Geodetic', 'Globe']
+__document_these__ = ['CRS', 'Geocentric', 'Geodetic', 'Globe', 'from_proj4']
 
 
 class RotatedGeodetic(CRS):
@@ -131,6 +132,57 @@ class Projection(CRS):
     def _as_mpl_axes(self):
         import cartopy.mpl.geoaxes as geoaxes
         return geoaxes.GeoAxes, {'map_projection': self}
+
+    #: Maps proj4 parameters to automatically filled values
+    #: for this Projection.
+    _proj4_unparameterised = {'scale_factor': 1.0, 'units': 'm'}
+    _default_globe_repr = "Globe(ellipse='WGS84')"
+    #: The "proj" crs name as defined by proj4.
+    _proj4_proj = None
+
+    def __repr__(self):
+        return self.from_proj4_wibble(self.proj4_init)
+    
+    @classmethod
+    def _proj4_params_to_cartopy(cls, params):
+        processeds = [False] * len(params)
+        for index, param in enumerate(params[:]):
+            name, _ = param
+            if hasattr(cls, '_PROJ4_param_special_case') and name in cls._PROJ4_param_special_case:
+                param[0] = cls._PROJ4_param_special_case[name]
+                processeds[index] = True
+            elif name in PROJ4_PARAM_TO_NAME:
+                param[0] = PROJ4_PARAM_TO_NAME[name]
+                processeds[index] = True
+        return params, processeds
+
+    def from_proj4_wibble(self, proj4_str):
+        """Given a proj4 string, return a class repr"""
+        params = _proj4_str_to_params(self.proj4_init)
+        # XXX Check proj....
+        params = [pair for pair in params if pair[0] != 'proj']
+        
+        globe_params = self.globe.from_proj4_params(params)
+
+        params, processeds = self._proj4_params_to_cartopy(params)
+        params, processeds = _remove_unparameterised(self, params, processeds)
+
+        if processeds and np.any(~np.array(processeds)):
+            print self.__class__._proj4_unparameterised
+            raise ValueError('Unhandled proj4 arguments: {}'.format(', '.join(param[0] for param, processed in zip(params, processeds) if not processed)))
+        
+        params.append(['globe', Globe.compute_repr(globe_params)])
+        _remove_default_params(self, params)
+
+        for param in params:
+            _, value = param 
+            # If we are still left with a string, then call repr with it to gain
+            # some speech marks.
+            if isinstance(value, basestring):
+                param[1] = value
+
+        return '{}({})'.format(self.__class__.__name__,
+                               ', '.join(['{0}={1}'.format(*arg_item) for arg_item in params]))
 
     def project_geometry(self, geometry, src_crs=None):
         """
@@ -546,8 +598,12 @@ class _CylindricalProjection(_RectangularProjection):
 
 
 class PlateCarree(_CylindricalProjection):
+    _default_globe_repr = "Globe(ellipse='WGS84', semimajor_axis=57.2957795131)"
+    _proj4_proj = 'eqc'
+
     def __init__(self, central_longitude=0.0, globe=None):
-        proj4_params = [('proj', 'eqc'), ('lon_0', central_longitude)]
+        proj4_params = [('proj', self._proj4_proj),
+                        ('lon_0', central_longitude)]
         if globe is None:
             globe = Globe(semimajor_axis=math.degrees(1))
         x_max = math.radians(globe.semimajor_axis or 6378137.0) * 180
@@ -648,6 +704,10 @@ class TransverseMercator(Projection):
     A Transverse Mercator projection.
 
     """
+    _proj4_proj = 'tmerc'
+    _proj4_unparameterised = Projection._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'zone': None})
+
     def __init__(self, central_longitude=0.0, central_latitude=0.0,
                  false_easting=0.0, false_northing=0.0,
                  scale_factor=1.0, globe=None):
@@ -696,6 +756,14 @@ class TransverseMercator(Projection):
 
 
 class OSGB(TransverseMercator):
+    _default_globe_repr = "Globe(datum='OSGB36', ellipse='airy')"
+    _proj4_unparameterised = TransverseMercator._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'scale_factor': 0.9996012717,
+                                   'central_longitude': -2,
+                                   'central_latitude': 49,
+                                   'false_easting': 400000,
+                                   'false_northing': -100000})
+    
     def __init__(self):
         super(OSGB, self).__init__(central_longitude=-2, central_latitude=49,
                                    scale_factor=0.9996012717,
@@ -719,6 +787,14 @@ class OSGB(TransverseMercator):
 
 
 class OSNI(TransverseMercator):
+    _proj4_unparameterised = TransverseMercator._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'scale_factor': 1.000035,
+                                   'central_longitude': -8,
+                                   'central_latitude': 53.5,
+                                   'false_easting': 200000,
+                                   'false_northing': 250000})
+    _default_globe_repr = "Globe(ellipse='WGS84', semimajor_axis=6377340.189, semiminor_axis=6356034.44794)"
+    
     def __init__(self):
         globe = Globe(semimajor_axis=6377340.189,
                       semiminor_axis=6356034.447938534)
@@ -751,6 +827,19 @@ class EuroPP(Projection):
     Ellipsoid is International 1924, Datum is ED50.
 
     """
+    _default_globe_repr = "Globe(ellipse='intl', towgs84='-87,-98,-121')"
+#    UNPARAMETERISED = Projection.UNPARAMETERISED + ['zone']
+    _proj4_unparameterised = TransverseMercator._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'central_longitude': 9,
+                                   'central_latitude': 50,
+                                   'false_easting': 1750000,
+                                   'false_northing': 1500000,
+                                   'zone': 32,
+                                   'scale_factor': 0.9996})
+    _proj4_proj = 'tmerc'
+    _default_globe_repr = "Globe(ellipse='intl', towgs84='-87,-98,-121')"
+    
+    
     def __init__(self):
         proj4_params = [('proj', 'tmerc'),
                         ('lat_0', 50), ('lon_0', 9),
@@ -785,6 +874,12 @@ class Mercator(Projection):
     A Mercator projection.
 
     """
+    _proj4_proj = 'merc'
+    _proj4_unparameterised = TransverseMercator._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'central_latitude': 0,
+                                   'false_easting': 0,
+                                   'false_northing': 0,
+                                   'true_scale_latitude': 1})
 
     def __init__(self, central_longitude=0.0,
                  min_latitude=-80.0, max_latitude=84.0,
@@ -850,6 +945,10 @@ class Mercator(Projection):
 
 
 class LambertCylindrical(_RectangularProjection):
+    _proj4_proj = 'cea'
+    _default_globe_repr = ("Globe(ellipse='WGS84', "
+                           "semimajor_axis=57.2957795131)")
+
     def __init__(self, central_longitude=0.0):
         proj4_params = [('proj', 'cea'), ('lon_0', central_longitude)]
         globe = Globe(semimajor_axis=math.degrees(1))
@@ -866,7 +965,35 @@ class LambertConformal(Projection):
     A Lambert Conformal conic projection.
 
     """
+    _proj4_proj = 'lcc'
+    
+    @classmethod
+    def _proj4_params_to_cartopy(cls, params):
+        params, processeds = Projection._proj4_params_to_cartopy(params)
 
+        # Move the secant_latitudes into place.
+        secant_latitudes = [None, None]
+        index = -1
+        for param in params[:]:
+            if param[0] == 'lat_1':
+                secant_latitudes[0] = param[1]
+                index = params.index(param)
+                params.pop(index)
+                processeds.pop(index)
+            elif param[0] == 'lat_2':
+                secant_latitudes[1] = param[1]
+                processeds.pop(params.index(param))
+                params.pop(params.index(param))
+        if secant_latitudes != [None, None]:
+            for index, default in enumerate([33, 45]):
+                if isinstance(secant_latitudes[index], basestring):
+                    secant_latitudes[index] = float(secant_latitudes[index])
+
+            params.insert(index, ['secant_latitudes', tuple(secant_latitudes)])
+            processeds.insert(index, True)
+
+        return params, processeds
+    
     def __init__(self, central_longitude=-96.0, central_latitude=39.0,
                  false_easting=0.0, false_northing=0.0,
                  secant_latitudes=(33, 45), globe=None, cutoff=-30):
@@ -895,12 +1022,14 @@ class LambertConformal(Projection):
                         ('x_0', false_easting),
                         ('y_0', false_northing)]
         if secant_latitudes is not None:
-            proj4_params.append(('lat_1', secant_latitudes[0]))
-            proj4_params.append(('lat_2', secant_latitudes[1]))
+            if secant_latitudes[0] is not None:
+                proj4_params.append(('lat_1', secant_latitudes[0]))
+            if secant_latitudes[1] is not None:
+                proj4_params.append(('lat_2', secant_latitudes[1]))
         super(LambertConformal, self).__init__(proj4_params, globe=globe)
 
         # are we north or south polar?
-        if abs(secant_latitudes[0]) > abs(secant_latitudes[1]):
+        if abs(secant_latitudes[0]) > abs(secant_latitudes[1] or -np.inf):
             poliest_sec = secant_latitudes[0]
         else:
             poliest_sec = secant_latitudes[1]
@@ -955,6 +1084,10 @@ class LambertConformal(Projection):
 
 
 class Miller(_RectangularProjection):
+    _proj4_proj = 'mill'
+    _default_globe_repr = ("Globe(ellipse='WGS84', "
+                           "semimajor_axis=57.2957795131)")
+
     def __init__(self, central_longitude=0.0):
         proj4_params = [('proj', 'mill'), ('lon_0', central_longitude)]
         globe = Globe(semimajor_axis=math.degrees(1))
@@ -967,6 +1100,13 @@ class Miller(_RectangularProjection):
 
 
 class RotatedPole(_CylindricalProjection):
+    _proj4_proj = 'ob_tran'
+    _PROJ4_param_special_case = {'lon_0': 'pole_longitude'}
+    _proj4_unparameterised = _compute_unparam(_CylindricalProjection,
+                                              {'to_meter': math.radians(1),
+                                               'o_lon_p': 0, 'o_lat_p': 90.0,
+                                               'o_proj': 'latlon'})
+
     def __init__(self, pole_longitude=0.0, pole_latitude=90.0, globe=None):
         proj4_params = [('proj', 'ob_tran'), ('o_proj', 'latlon'),
                         ('o_lon_p', 0), ('o_lat_p', pole_latitude),
@@ -974,12 +1114,22 @@ class RotatedPole(_CylindricalProjection):
                         ('to_meter', math.radians(1))]
         super(RotatedPole, self).__init__(proj4_params, 180, 90, globe=globe)
 
+    @classmethod
+    def _proj4_params_to_cartopy(cls, params):
+        params, processeds = super(RotatedPole, cls)._proj4_params_to_cartopy(params)
+        for param in params[:]:
+            if param[0] == 'pole_longitude':
+                param[1] = param[1] - 180
+        return params, processeds
+
     @property
     def threshold(self):
         return 0.5
 
 
 class Gnomonic(Projection):
+    _proj4_proj = 'gnom'
+
     def __init__(self, central_latitude=0.0, globe=None):
         proj4_params = [('proj', 'gnom'), ('lat_0', central_latitude)]
         super(Gnomonic, self).__init__(proj4_params, globe=globe)
@@ -1003,6 +1153,8 @@ class Gnomonic(Projection):
 
 
 class Stereographic(Projection):
+    _proj4_proj = 'stere'
+
     def __init__(self, central_latitude=0.0, central_longitude=0.0,
                  false_easting=0.0, false_northing=0.0,
                  true_scale_latitude=None, globe=None):
@@ -1062,6 +1214,10 @@ class Stereographic(Projection):
 
 
 class NorthPolarStereo(Stereographic):
+    _proj4_unparameterised = _compute_unparam(Stereographic,
+                                              {'central_latitude': 90},
+                                              ['central_longitude', 'globe'])
+
     def __init__(self, central_longitude=0.0, globe=None):
         super(NorthPolarStereo, self).__init__(
             central_latitude=90,
@@ -1069,6 +1225,10 @@ class NorthPolarStereo(Stereographic):
 
 
 class SouthPolarStereo(Stereographic):
+    _proj4_unparameterised = _compute_unparam(Stereographic,
+                                              {'central_latitude': -90},
+                                              ['central_longitude', 'globe'])
+
     def __init__(self, central_longitude=0.0, globe=None):
         super(SouthPolarStereo, self).__init__(
             central_latitude=-90,
@@ -1076,6 +1236,8 @@ class SouthPolarStereo(Stereographic):
 
 
 class Orthographic(Projection):
+    _proj4_proj = 'ortho'
+
     def __init__(self, central_longitude=0.0, central_latitude=0.0,
                  globe=None):
         proj4_params = [('proj', 'ortho'), ('lon_0', central_longitude),
@@ -1143,6 +1305,8 @@ class _WarpedRectangularProjection(Projection):
 
 
 class Mollweide(_WarpedRectangularProjection):
+    _proj4_proj = 'moll'
+
     def __init__(self, central_longitude=0, globe=None):
         proj4_params = [('proj', 'moll'), ('lon_0', central_longitude)]
         super(Mollweide, self).__init__(proj4_params, central_longitude,
@@ -1154,6 +1318,8 @@ class Mollweide(_WarpedRectangularProjection):
 
 
 class Robinson(_WarpedRectangularProjection):
+    _proj4_proj = 'robin'
+
     def __init__(self, central_longitude=0, globe=None):
         # Warn when using Robinson with proj4 4.8 due to discontinuity at
         # 40 deg N introduced by incomplete fix to issue #113 (see
@@ -1234,6 +1400,8 @@ class Robinson(_WarpedRectangularProjection):
 
 
 class InterruptedGoodeHomolosine(Projection):
+    _proj4_proj = 'igh'
+
     def __init__(self, central_longitude=0, globe=None):
         proj4_params = [('proj', 'igh'), ('lon_0', central_longitude)]
         super(InterruptedGoodeHomolosine, self).__init__(proj4_params,
@@ -1309,6 +1477,10 @@ class InterruptedGoodeHomolosine(Projection):
 
 
 class Geostationary(Projection):
+    _proj4_proj = 'geos'
+    _proj4_unparameterised = _compute_unparam(Stereographic,
+                                              {'central_latitude': 0})
+
     def __init__(self, central_longitude=0.0, satellite_height=35785831,
                  false_easting=0, false_northing=0, globe=None):
         proj4_params = [('proj', 'geos'), ('lon_0', central_longitude),
