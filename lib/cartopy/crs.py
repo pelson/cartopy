@@ -1,4 +1,4 @@
-# (C) British Crown Copyright 2011 - 2012, Met Office
+# (C) British Crown Copyright 2011 - 2014, Met Office
 #
 # This file is part of cartopy.
 #
@@ -131,6 +131,77 @@ class Projection(CRS):
     def _as_mpl_axes(self):
         import cartopy.mpl.geoaxes as geoaxes
         return geoaxes.GeoAxes, {'map_projection': self}
+
+    PROJ4_1TO1 = {'lon_0': 'central_longitude',
+                  'lat_0': 'central_latitude',
+                  'x_0': 'false_easting',
+                  'y_0': 'false_northing',
+                  'h': 'satellite_height'}
+    UNPARAMETERISED = ['proj', 'k', 'units']
+    _default_globe_repr = "Globe(ellipse='WGS84')"
+
+    def compute_repr(self):
+        return self.from_proj4(self.proj4_init)
+    
+    def from_proj4(self, proj4_str):
+        import inspect
+        argspec = inspect.getargspec(self.__init__)
+        defaults = dict(zip(argspec.args[1:], argspec.defaults or []))
+        args = []
+        params = []
+        for param in proj4_str.split('+')[1:]:
+            param = param.strip().split('=')
+            params.append(param)
+        
+        globe_params = self.globe.from_proj4_params(params)
+        
+        for param in params:
+            param = param
+            if len(param) == 2:
+                if self.PROJ4_1TO1.get(param[0], None) is not None:
+                    name = self.PROJ4_1TO1[param[0]]
+                    value = cast_value = param[1]
+                    default_value = defaults.get(name, None)
+                    
+                    try:
+                        if str(int(param[1])) == param[1]: 
+                            cast_value = int(param[1])
+                    except ValueError:
+                        try:
+                            if str(float(param[1])) == param[1]: 
+                                cast_value = float(param[1])
+                        except ValueError:
+                            try:
+                                cast_value = type(default_value)(param[1])
+                            except TypeError:
+                                pass
+                    
+                    # Call the repr here, rather than later on.
+                    if isinstance(cast_value, basestring):
+                        cast_value = repr(value)
+
+                    args.append([name, cast_value])
+                else:
+                    if param[0] not in self.UNPARAMETERISED:
+                        print 'UNHANDLED:', param
+        args.append(['globe', self.globe.compute_repr(globe_params)])
+        self._post_proj4_arg_process(args)
+        
+        for name, value in args[:]:
+            if name not in defaults:
+#                print 'No argument for {} found is this a special case?'.format(name)
+                args.remove([name, value])
+                continue
+            if defaults[name] == value:
+                args.remove([name, value])
+        
+        return '{}({})'.format(self.__class__.__name__,
+                               ', '.join(['{0}={1}'.format(*arg_item) for arg_item in args]))
+
+    def _post_proj4_arg_process(self, args):
+        for arg in args[:]:
+            if arg[0] == 'globe' and arg[1] == self._default_globe_repr:
+                args.remove(arg)
 
     def project_geometry(self, geometry, src_crs=None):
         """
@@ -546,6 +617,8 @@ class _CylindricalProjection(_RectangularProjection):
 
 
 class PlateCarree(_CylindricalProjection):
+    _default_globe_repr = "Globe(ellipse='WGS84', semimajor_axis=57.2957795131)"
+
     def __init__(self, central_longitude=0.0, globe=None):
         proj4_params = [('proj', 'eqc'), ('lon_0', central_longitude)]
         if globe is None:
@@ -696,6 +769,7 @@ class TransverseMercator(Projection):
 
 
 class OSGB(TransverseMercator):
+    _default_globe_repr = "Globe(datum='OSGB36', ellipse='airy')"
     def __init__(self):
         super(OSGB, self).__init__(central_longitude=-2, central_latitude=49,
                                    scale_factor=0.9996012717,
@@ -751,6 +825,9 @@ class EuroPP(Projection):
     Ellipsoid is International 1924, Datum is ED50.
 
     """
+    _default_globe_repr = "Globe(ellipse='intl', towgs84='-87,-98,-121')"
+    UNPARAMETERISED = Projection.UNPARAMETERISED + ['zone'] 
+    
     def __init__(self):
         proj4_params = [('proj', 'tmerc'),
                         ('lat_0', 50), ('lon_0', 9),
@@ -866,7 +943,26 @@ class LambertConformal(Projection):
     A Lambert Conformal conic projection.
 
     """
+    PROJ4_1TO1 = Projection.PROJ4_1TO1.copy()
+    PROJ4_1TO1.update({'lat_1': 'secant_latitudes0',
+                       'lat_2': 'secant_latitudes1'})
+    
+    def _post_proj4_arg_process(self, args):
+        secant_latitudes = [None, None]
+        index = -1
+        for arg in args[:]:
+            if arg[0] == 'secant_latitudes0':
+                secant_latitudes[0] = arg[1]
+                index = args.index(arg)
+                args.remove(arg)
+            elif arg[0] == 'secant_latitudes1':
+                secant_latitudes[1] = arg[1]
+                args.remove(arg)
+        if secant_latitudes != [None, None]:
+            args.insert(index, ['secant_latitudes', tuple(secant_latitudes)])
 
+        return Projection._post_proj4_arg_process(self, args)
+    
     def __init__(self, central_longitude=-96.0, central_latitude=39.0,
                  false_easting=0.0, false_northing=0.0,
                  secant_latitudes=(33, 45), globe=None, cutoff=-30):
@@ -967,12 +1063,24 @@ class Miller(_RectangularProjection):
 
 
 class RotatedPole(_CylindricalProjection):
+    PROJ4_1TO1 = _CylindricalProjection.PROJ4_1TO1.copy()
+    PROJ4_1TO1.update({'o_lat_p': 'pole_latitude',
+                       'lon_0': 'pole_longitude'})
+    
+    UNPARAMETERISED = _CylindricalProjection.UNPARAMETERISED + ['to_meter',
+                            'o_proj', 'to_meter', 'o_lon_p']
     def __init__(self, pole_longitude=0.0, pole_latitude=90.0, globe=None):
         proj4_params = [('proj', 'ob_tran'), ('o_proj', 'latlon'),
                         ('o_lon_p', 0), ('o_lat_p', pole_latitude),
                         ('lon_0', 180 + pole_longitude),
                         ('to_meter', math.radians(1))]
         super(RotatedPole, self).__init__(proj4_params, 180, 90, globe=globe)
+
+    def _post_proj4_arg_process(self, args):
+        for arg in args[:]:
+            if arg[0] == 'pole_longitude':
+                arg[1] = arg[1] - 180
+        return _CylindricalProjection._post_proj4_arg_process(self, args)
 
     @property
     def threshold(self):
@@ -1374,3 +1482,10 @@ def _find_gt(a, x):
         if v.distance > x:
             return v
     return a[0]
+
+
+if __name__ == '__main__':
+    import os
+    os.system('cd ../..; echo $(pwd); python2.7 setup.py build_ext --inplace')
+    reload(cartopy._crs)
+    import test_crs_repr
