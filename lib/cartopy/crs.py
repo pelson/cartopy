@@ -139,69 +139,141 @@ class Projection(CRS):
                   'h': 'satellite_height'}
     UNPARAMETERISED = ['proj', 'k', 'units']
     _default_globe_repr = "Globe(ellipse='WGS84')"
+    _proj4_proj = None
 
-    def compute_repr(self):
-        return self.from_proj4(self.proj4_init)
+    def __repr__(self):
+        return self.from_proj4_wibble(self.proj4_init)
     
-    def from_proj4(self, proj4_str):
+    @staticmethod
+    def _proj4_str_to_params(proj4_string):
+        """
+        Turns a string into a list of key value pairs (unless it
+        is a single value such as +nodefs).
+
+        """
+        params = []
+        for param in proj4_string.split('+'):
+            param = param.strip().split('=')
+            if not param[0] or param == ['no_defs']:
+                continue
+            
+            name, value = param
+            cast_value = value
+
+            # Try to maintain the type of the value provided in the proj4 string,
+            # so attempt to cast to an int first to see if that was how it was given to us.
+            cast_attempts = [int, float]
+            for caster in cast_attempts:
+                try:
+                    if str(caster(value)) == value: 
+                        cast_value = caster(value)
+                        break
+                except (ValueError, TypeError):
+                    continue
+            
+            param[1] = cast_value
+            
+            params.append(param)
+        return params
+
+    @classmethod
+    def _proj4_params_to_cartopy(cls, params):
+        processeds = [False] * len(params)
+        for index, param in enumerate(params[:]):
+            name, value = param
+
+            if name in cls.PROJ4_1TO1:
+                param[0] = cls.PROJ4_1TO1[param[0]]
+                processeds[index] = True
+            elif name in cls.UNPARAMETERISED:
+                param[0] = None 
+                processeds[index] = True
+            
+        return params, processeds
+    
+    def _remove_default_params(self, params):
         import inspect
         argspec = inspect.getargspec(self.__init__)
         defaults = dict(zip(argspec.args[1:], argspec.defaults or []))
-        args = []
-        params = []
-        for param in proj4_str.split('+')[1:]:
-            param = param.strip().split('=')
-            params.append(param)
+        for name, value in params[:]:
+            if name not in defaults:
+                # Remove those which are not actually arguments to this class (e.g. special cases such as OSGB).
+#                print 'No argument for {} found is this a special case?'.format(name)
+                params.remove([name, value])
+            elif defaults[name] == value:
+                params.remove([name, value])
+            elif name == 'globe' and value == self._default_globe_repr:
+                params.remove([name, value])
+    
+    @staticmethod
+    def from_proj4(proj4_str):
+        def all_subclasses(cls):
+            return cls.__subclasses__() + [g for s in cls.__subclasses__()
+                                           for g in all_subclasses(s)]
+        
+        params = Projection._proj4_str_to_params(proj4_str)
+        for param in params[:]:
+            if param[0] == 'proj':
+                proj = param[1]
+                params.remove(param)
+                break
+        else:
+            raise ValueError('No projection found in the Proj4 string.')
+        
+        potentials = []
+        for cls in all_subclasses(Projection):
+            if cls._proj4_proj == proj:
+                potentials.append(cls)
+        
+        if not potentials:
+            raise ValueError('No cartopy Projection class can currently '
+                             'handle the proj4 {} projection.'.format(proj))
+        print potentials
+        
+        globe_params = Globe.from_proj4_params(params)
+
+        for projection in potentials:
+            these_params, processeds = projection._proj4_params_to_cartopy(params[:])
+            
+            if np.any(~np.array(processeds)):
+                print 'cannot be :', projection
+                continue
+            
+            these_params.append(['globe', eval(Globe.compute_repr(globe_params))])
+            crs = projection(**dict(these_params))
+            print 'Created:', crs
+            if crs.proj4_init == proj4_str:
+                break
+        else:
+            print these_params
+            
+            raise ValueError('No projection can currently handle this combination of proj4 parameters.')
+        return crs
+    
+    def from_proj4_wibble(self, proj4_str):
+        params = self._proj4_str_to_params(self.proj4_init)
+        # XXX Check proj....
+        params = [pair for pair in params if pair[0] != 'proj']
         
         globe_params = self.globe.from_proj4_params(params)
+
+        params, processeds = self._proj4_params_to_cartopy(params)
         
+        if np.any(~np.array(processeds)):
+            raise ValueError('Unhandled proj4 arguments: {}'.format(', '.join(param[0] for param, processed in zip(params, processeds) if not processed)))
+        
+        params.append(['globe', Globe.compute_repr(globe_params)])
+        self._remove_default_params(params)
+
         for param in params:
-            param = param
-            if len(param) == 2:
-                if self.PROJ4_1TO1.get(param[0], None) is not None:
-                    name = self.PROJ4_1TO1[param[0]]
-                    value = cast_value = param[1]
-                    default_value = defaults.get(name, None)
-                    
-                    try:
-                        if str(int(param[1])) == param[1]: 
-                            cast_value = int(param[1])
-                    except ValueError:
-                        try:
-                            if str(float(param[1])) == param[1]: 
-                                cast_value = float(param[1])
-                        except ValueError:
-                            try:
-                                cast_value = type(default_value)(param[1])
-                            except TypeError:
-                                pass
-                    
-                    # Call the repr here, rather than later on.
-                    if isinstance(cast_value, basestring):
-                        cast_value = repr(value)
+            _, value = param 
+            # If we are still left with a string, then call repr with it to gain
+            # some speech marks.
+            if isinstance(value, basestring):
+                param[1] = value
 
-                    args.append([name, cast_value])
-                else:
-                    if param[0] not in self.UNPARAMETERISED:
-                        print 'UNHANDLED:', param
-        args.append(['globe', self.globe.compute_repr(globe_params)])
-        self._post_proj4_arg_process(args)
-        
-        for name, value in args[:]:
-            if name not in defaults:
-#                print 'No argument for {} found is this a special case?'.format(name)
-                args.remove([name, value])
-                continue
-            if defaults[name] == value:
-                args.remove([name, value])
-        
         return '{}({})'.format(self.__class__.__name__,
-                               ', '.join(['{0}={1}'.format(*arg_item) for arg_item in args]))
-
-    def _post_proj4_arg_process(self, args):
-        for arg in args[:]:
-            if arg[0] == 'globe' and arg[1] == self._default_globe_repr:
-                args.remove(arg)
+                               ', '.join(['{0}={1}'.format(*arg_item) for arg_item in params]))
 
     def project_geometry(self, geometry, src_crs=None):
         """
@@ -618,9 +690,11 @@ class _CylindricalProjection(_RectangularProjection):
 
 class PlateCarree(_CylindricalProjection):
     _default_globe_repr = "Globe(ellipse='WGS84', semimajor_axis=57.2957795131)"
+    _proj4_proj = 'eqc'
 
     def __init__(self, central_longitude=0.0, globe=None):
-        proj4_params = [('proj', 'eqc'), ('lon_0', central_longitude)]
+        proj4_params = [('proj', self._proj4_proj),
+                        ('lon_0', central_longitude)]
         if globe is None:
             globe = Globe(semimajor_axis=math.degrees(1))
         x_max = math.radians(globe.semimajor_axis or 6378137.0) * 180
@@ -862,6 +936,7 @@ class Mercator(Projection):
     A Mercator projection.
 
     """
+    _proj4_proj = 'merc'
 
     def __init__(self, central_longitude=0.0,
                  min_latitude=-80.0, max_latitude=84.0,
@@ -943,25 +1018,32 @@ class LambertConformal(Projection):
     A Lambert Conformal conic projection.
 
     """
-    PROJ4_1TO1 = Projection.PROJ4_1TO1.copy()
-    PROJ4_1TO1.update({'lat_1': 'secant_latitudes0',
-                       'lat_2': 'secant_latitudes1'})
+#    PROJ4_1TO1 = Projection.PROJ4_1TO1.copy()
+#    PROJ4_1TO1.update({'lat_1': 'secant_latitudes0',
+#                       'lat_2': 'secant_latitudes1'})
     
-    def _post_proj4_arg_process(self, args):
+    @classmethod
+    def _proj4_params_to_cartopy(cls, params):
+        params, processeds = Projection._proj4_params_to_cartopy(params)
+        
+        # Move the secant_latitudes into place.
         secant_latitudes = [None, None]
         index = -1
-        for arg in args[:]:
-            if arg[0] == 'secant_latitudes0':
-                secant_latitudes[0] = arg[1]
-                index = args.index(arg)
-                args.remove(arg)
-            elif arg[0] == 'secant_latitudes1':
-                secant_latitudes[1] = arg[1]
-                args.remove(arg)
+        for param in params[:]:
+            if param[0] == 'lat_1':
+                secant_latitudes[0] = param[1]
+                index = params.index(param)
+                params.pop(index)
+                processeds.pop(index)
+            elif param[0] == 'lat_2':
+                secant_latitudes[1] = param[1]
+                processeds.pop(params.index(param))
+                params.pop(params.index(param))
         if secant_latitudes != [None, None]:
-            args.insert(index, ['secant_latitudes', tuple(secant_latitudes)])
+            params.insert(index, ['secant_latitudes', tuple(secant_latitudes)])
+            processeds.insert(index, True)
 
-        return Projection._post_proj4_arg_process(self, args)
+        return params, processeds
     
     def __init__(self, central_longitude=-96.0, central_latitude=39.0,
                  false_easting=0.0, false_northing=0.0,
@@ -1076,11 +1158,13 @@ class RotatedPole(_CylindricalProjection):
                         ('to_meter', math.radians(1))]
         super(RotatedPole, self).__init__(proj4_params, 180, 90, globe=globe)
 
-    def _post_proj4_arg_process(self, args):
-        for arg in args[:]:
-            if arg[0] == 'pole_longitude':
-                arg[1] = arg[1] - 180
-        return _CylindricalProjection._post_proj4_arg_process(self, args)
+    @classmethod
+    def _proj4_params_to_cartopy(cls, params):
+        params, processeds =  super(RotatedPole, cls)._proj4_params_to_cartopy(params)
+        for param in params[:]:
+            if param[0] == 'pole_longitude':
+                param[1] = param[1] - 180
+        return params, processeds
 
     @property
     def threshold(self):

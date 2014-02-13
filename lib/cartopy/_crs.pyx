@@ -114,13 +114,14 @@ class Globe(object):
                         ['towgs84', self.towgs84], ['nadgrids', self.nadgrids])
         return OrderedDict((k, v) for k, v in proj4_params if v is not None)
 
-    def from_proj4_params(self, params_list):
+    @staticmethod
+    def from_proj4_params(params_list):
         """
         removes params from params_dict.
         """
         params = []
         for param in params_list[:]:
-            if param[0] in self.PROJ4_1TO1:
+            if param[0] in Globe.PROJ4_1TO1:
                 params_list.remove(param)
                 params.append(param)
         return params
@@ -133,7 +134,8 @@ class Globe(object):
 
     UNPARAMETERISED = []
 
-    def compute_repr(self, params):
+    @staticmethod
+    def compute_repr(params):
         defaults ={'datum': None, 'ellipse': None, #'WGS84', (Force WGS84 to be returned)
                    'semimajor_axis': None, 'semiminor_axis': None,
                    'flattening': None, 'inverse_flattening': None,
@@ -141,8 +143,8 @@ class Globe(object):
         args = []
         for param in params:
             if len(param) == 2:
-                if self.PROJ4_1TO1.get(param[0], None) is not None:
-                    name = self.PROJ4_1TO1[param[0]]
+                if Globe.PROJ4_1TO1.get(param[0], None) is not None:
+                    name = Globe.PROJ4_1TO1[param[0]]
                     
                     value = cast_value = param[1]
                     default_value = defaults.get(name, None)
@@ -167,10 +169,9 @@ class Globe(object):
                     if default_value != cast_value:
                         args.append([name, cast_value])
                 else:
-                    if param[0] not in self.UNPARAMETERISED:
+                    if param[0] not in Globe.UNPARAMETERISED:
                         print 'UNHANDLED:', param
-        return '{}({})'.format(self.__class__.__name__,
-                               ', '.join(['{}={}'.format(*arg_item) for arg_item in args]))
+        return 'Globe({})'.format(', '.join(['{}={}'.format(*arg_item) for arg_item in args]))
 
 cdef class CRS:
     """
