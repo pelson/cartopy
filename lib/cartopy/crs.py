@@ -136,8 +136,15 @@ class Projection(CRS):
                   'lat_0': 'central_latitude',
                   'x_0': 'false_easting',
                   'y_0': 'false_northing',
-                  'h': 'satellite_height'}
-    UNPARAMETERISED = ['proj', 'k', 'units']
+                  'h': 'satellite_height',
+                  'k': 'scale_factor'}
+    # TODO: This can be automatic - we know what the default arguments are, and we know what
+    # we want to pass. All we need to do then is have a record of unparameterised keys and
+    # their associated value
+    UNPARAMETERISED = ['units']
+    #: Maps proj4 parameters to automatically filled values
+    #: for this Projection.
+    _proj4_unparameterised = {}
     _default_globe_repr = "Globe(ellipse='WGS84')"
     _proj4_proj = None
 
@@ -170,9 +177,9 @@ class Projection(CRS):
                         break
                 except (ValueError, TypeError):
                     continue
-            
+
             param[1] = cast_value
-            
+
             params.append(param)
         return params
 
@@ -185,32 +192,65 @@ class Projection(CRS):
             if name in cls.PROJ4_1TO1:
                 param[0] = cls.PROJ4_1TO1[param[0]]
                 processeds[index] = True
-            elif name in cls.UNPARAMETERISED:
-                param[0] = None 
+
+            if param[0] in cls.UNPARAMETERISED:
+                param[0] = None
                 processeds[index] = True
-            
+
+        # Remove any unparameterised arguments.
+        for param in params[:]:
+            if param[0] == None:
+                index = params.index(param)
+                params.pop(index)
+                processeds.pop(index)
+
         return params, processeds
-    
-    def _remove_default_params(self, params):
+
+    @classmethod
+    def _inherited_defaults(cls):
         import inspect
-        argspec = inspect.getargspec(self.__init__)
-        defaults = dict(zip(argspec.args[1:], argspec.defaults or []))
+        defaults = {}
+        for klass in cls.mro()[::-1]:
+            if issubclass(klass, Projection) and klass is not Projection:
+                argspec = inspect.getargspec(klass.__init__)
+                defaults.update(dict(zip(argspec.args[1:],
+                                         argspec.defaults or [])))
+        return defaults
+
+    @classmethod
+    def _remove_default_params(cls, params):
+        defaults = cls._inherited_defaults()
         for name, value in params[:]:
-            if name not in defaults:
-                # Remove those which are not actually arguments to this class (e.g. special cases such as OSGB).
-#                print 'No argument for {} found is this a special case?'.format(name)
+            if defaults.get(name) == value:
                 params.remove([name, value])
-            elif defaults[name] == value:
+            elif name == 'globe' and value == cls._default_globe_repr:
                 params.remove([name, value])
-            elif name == 'globe' and value == self._default_globe_repr:
-                params.remove([name, value])
-    
+
+    @classmethod
+    def _remove_unparameterised(cls, params, processeds, logger=lambda arg: None):
+        for param in params[:]:
+            if param[0] in cls._proj4_unparameterised:
+                fixed_value = cls._proj4_unparameterised[param[0]]
+                # a value of None means that it isn't handled.
+                if fixed_value is None:
+                    pass
+                elif fixed_value == param[1]:
+                    index = params.index(param)
+                    processeds.pop(index)
+                    params.pop(index)
+                else:
+                    logger(' Value ({}) of {} not aligned with unparameterised '
+                           '{}.'.format(param[1], param[0], fixed_value))
+        return params, processeds
+
     @staticmethod
-    def from_proj4(proj4_str):
+    def from_proj4(proj4_str, logger=lambda entry: None):
+        import inspect
+
         def all_subclasses(cls):
             return cls.__subclasses__() + [g for s in cls.__subclasses__()
                                            for g in all_subclasses(s)]
-        
+
         params = Projection._proj4_str_to_params(proj4_str)
         for param in params[:]:
             if param[0] == 'proj':
@@ -228,28 +268,62 @@ class Projection(CRS):
         if not potentials:
             raise ValueError('No cartopy Projection class can currently '
                              'handle the proj4 {} projection.'.format(proj))
-        print potentials
+#        print potentials
         
         globe_params = Globe.from_proj4_params(params)
-
-        for projection in potentials:
+        for projection in potentials[::-1]:
+            prj_kwargs = inspect.getargspec(projection.__init__).args[1:]
+            
+            logger('Trying class {}'.format(projection))
+            
             these_params, processeds = projection._proj4_params_to_cartopy(params[:])
             
-            if np.any(~np.array(processeds)):
-                print 'cannot be :', projection
+            logger('Starting with parameters:\n\t{}'.format(these_params))
+            
+            projection._remove_unparameterised(these_params, processeds, logger)
+            
+            logger('After removing unparameterised values which correspond to '
+                   'the existing default:\n\t{}'.format(these_params))
+
+            unprocesseds = set([param[0] for param, processed in
+                                zip(params, processeds) if not processed])
+
+            # If it isn't the default value, but it is allowed, then consider the value processed.            
+            if unprocesseds - set(prj_kwargs):
+                logger('Class {} was rejected as there remain unprocessed '
+                       'parameters: {}'.format(projection,
+                                               ', '.join(unprocesseds)))
                 continue
             
-            these_params.append(['globe', eval(Globe.compute_repr(globe_params))])
-            crs = projection(**dict(these_params))
-            print 'Created:', crs
+            if projection._default_globe_repr != Globe.compute_repr(globe_params):
+                logger('Adding globe {}'.format(Globe.compute_repr(globe_params)))
+                these_params.append(['globe', eval(Globe.compute_repr(globe_params))])
+            
+            # Tidy up by removing the arguments which aren't doing
+            # anything (because they are already the default).
+            projection._remove_default_params(these_params)
+            
+            unacceptable_kwargs = set(dict(these_params).keys()) - set(prj_kwargs)
+            if unacceptable_kwargs:
+                logger('Class {} was rejected as there are keywords which are '
+                       'not acceptable: {}'.format(projection,
+                                                   ', '.join(unacceptable_kwargs)))
+                continue
+            else:
+                crs = projection(**dict(these_params))
+
             if crs.proj4_init == proj4_str:
                 break
+            else:
+                logger("Class {} was constructed but the underlying proj4 "
+                       "string wasn't identical:\nExpected:\t{}"
+                       "\nActual:\t{}".format(projection, crs.proj4_init, proj4_str))
         else:
-            print these_params
-            
-            raise ValueError('No projection can currently handle this combination of proj4 parameters.')
+            raise ValueError('No projection can currently handle this combination of proj4 parameters.\n' 
+                             'Required parameters: {} for the projection {}. Original proj4 string:\n{}'
+                             ''.format(', '.join(dict(these_params).keys()), proj, proj4_str))
         return crs
-    
+
     def from_proj4_wibble(self, proj4_str):
         params = self._proj4_str_to_params(self.proj4_init)
         # XXX Check proj....
@@ -258,8 +332,9 @@ class Projection(CRS):
         globe_params = self.globe.from_proj4_params(params)
 
         params, processeds = self._proj4_params_to_cartopy(params)
+        params, processeds = self._remove_unparameterised(params, processeds)
         
-        if np.any(~np.array(processeds)):
+        if processeds and np.any(~np.array(processeds)):
             raise ValueError('Unhandled proj4 arguments: {}'.format(', '.join(param[0] for param, processed in zip(params, processeds) if not processed)))
         
         params.append(['globe', Globe.compute_repr(globe_params)])
@@ -795,6 +870,10 @@ class TransverseMercator(Projection):
     A Transverse Mercator projection.
 
     """
+    _proj4_proj = 'tmerc'
+    UNPARAMETERISED = Projection.UNPARAMETERISED + ['zone']
+    _proj4_unparameterised = {'zone': None}
+
     def __init__(self, central_longitude=0.0, central_latitude=0.0,
                  false_easting=0.0, false_northing=0.0,
                  scale_factor=1.0, globe=None):
@@ -844,6 +923,13 @@ class TransverseMercator(Projection):
 
 class OSGB(TransverseMercator):
     _default_globe_repr = "Globe(datum='OSGB36', ellipse='airy')"
+    _proj4_unparameterised = TransverseMercator._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'scale_factor': 0.9996012717,
+                                   'central_longitude': -2,
+                                   'central_latitude': 49,
+                                   'false_easting': 400000,
+                                   'false_northing': -100000})
+    
     def __init__(self):
         super(OSGB, self).__init__(central_longitude=-2, central_latitude=49,
                                    scale_factor=0.9996012717,
@@ -867,6 +953,14 @@ class OSGB(TransverseMercator):
 
 
 class OSNI(TransverseMercator):
+    _proj4_unparameterised = TransverseMercator._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'scale_factor': 1.000035,
+                                   'central_longitude': -8,
+                                   'central_latitude': 53.5,
+                                   'false_easting': 200000,
+                                   'false_northing': 250000})
+    _default_globe_repr = "Globe(ellipse='WGS84', semimajor_axis=6377340.189, semiminor_axis=6356034.44794)"
+    
     def __init__(self):
         globe = Globe(semimajor_axis=6377340.189,
                       semiminor_axis=6356034.447938534)
@@ -900,7 +994,18 @@ class EuroPP(Projection):
 
     """
     _default_globe_repr = "Globe(ellipse='intl', towgs84='-87,-98,-121')"
-    UNPARAMETERISED = Projection.UNPARAMETERISED + ['zone'] 
+#    UNPARAMETERISED = Projection.UNPARAMETERISED + ['zone']
+    _proj4_unparameterised = TransverseMercator._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'scale_factor': 1.000035,
+                                   'central_longitude': 9,
+                                   'central_latitude': 50,
+                                   'false_easting': 1750000,
+                                   'false_northing': 1500000,
+                                   'zone': 32,
+                                   'scale_factor': 0.9996})
+    _proj4_proj = 'tmerc'
+    _default_globe_repr = "Globe(ellipse='intl', towgs84='-87,-98,-121')"
+    
     
     def __init__(self):
         proj4_params = [('proj', 'tmerc'),
@@ -937,6 +1042,7 @@ class Mercator(Projection):
 
     """
     _proj4_proj = 'merc'
+    UNPARAMETERISED = Projection.UNPARAMETERISED + ['k', 'scale_factor']
 
     def __init__(self, central_longitude=0.0,
                  min_latitude=-80.0, max_latitude=84.0,
@@ -1018,6 +1124,7 @@ class LambertConformal(Projection):
     A Lambert Conformal conic projection.
 
     """
+    _proj4_proj = 'lcc'
 #    PROJ4_1TO1 = Projection.PROJ4_1TO1.copy()
 #    PROJ4_1TO1.update({'lat_1': 'secant_latitudes0',
 #                       'lat_2': 'secant_latitudes1'})
@@ -1145,6 +1252,8 @@ class Miller(_RectangularProjection):
 
 
 class RotatedPole(_CylindricalProjection):
+    _proj4_proj = 'ob_tran'
+
     PROJ4_1TO1 = _CylindricalProjection.PROJ4_1TO1.copy()
     PROJ4_1TO1.update({'o_lat_p': 'pole_latitude',
                        'lon_0': 'pole_longitude'})
@@ -1195,6 +1304,8 @@ class Gnomonic(Projection):
 
 
 class Stereographic(Projection):
+    _proj4_proj = 'stere'
+
     def __init__(self, central_latitude=0.0, central_longitude=0.0,
                  false_easting=0.0, false_northing=0.0,
                  true_scale_latitude=None, globe=None):
@@ -1254,6 +1365,9 @@ class Stereographic(Projection):
 
 
 class NorthPolarStereo(Stereographic):
+    _proj4_unparameterised = Stereographic._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'central_latitude': 90})
+
     def __init__(self, central_longitude=0.0, globe=None):
         super(NorthPolarStereo, self).__init__(
             central_latitude=90,
@@ -1261,6 +1375,9 @@ class NorthPolarStereo(Stereographic):
 
 
 class SouthPolarStereo(Stereographic):
+    _proj4_unparameterised = Stereographic._proj4_unparameterised.copy()
+    _proj4_unparameterised.update({'central_latitude': -90})
+
     def __init__(self, central_longitude=0.0, globe=None):
         super(SouthPolarStereo, self).__init__(
             central_latitude=-90,
@@ -1501,6 +1618,9 @@ class InterruptedGoodeHomolosine(Projection):
 
 
 class Geostationary(Projection):
+    _proj4_proj = 'geos'
+    UNPARAMETERISED = Projection.UNPARAMETERISED + ['central_latitude']
+
     def __init__(self, central_longitude=0.0, satellite_height=35785831,
                  false_easting=0, false_northing=0, globe=None):
         proj4_params = [('proj', 'geos'), ('lon_0', central_longitude),
