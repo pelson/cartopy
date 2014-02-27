@@ -137,14 +137,16 @@ class Projection(CRS):
                   'x_0': 'false_easting',
                   'y_0': 'false_northing',
                   'h': 'satellite_height',
-                  'k': 'scale_factor'}
+                  'k': 'scale_factor',
+                  'k_0': 'scale_factor',
+                  'lat_ts': 'true_scale_latitude'}
     # TODO: This can be automatic - we know what the default arguments are, and we know what
     # we want to pass. All we need to do then is have a record of unparameterised keys and
     # their associated value
     UNPARAMETERISED = ['units']
     #: Maps proj4 parameters to automatically filled values
     #: for this Projection.
-    _proj4_unparameterised = {}
+    _proj4_unparameterised = {'scale_factor': 1.0}
     _default_globe_repr = "Globe(ellipse='WGS84')"
     _proj4_proj = None
 
@@ -312,12 +314,18 @@ class Projection(CRS):
             else:
                 crs = projection(**dict(these_params))
 
-            if crs.proj4_init == proj4_str:
+            actual = sorted(Projection._proj4_str_to_params(crs.proj4_init))
+            expected = sorted(Projection._proj4_str_to_params(proj4_str))
+            
+            # Turn any non string values into floats for both: 
+            actual = [[k, v if isinstance(v, basestring) else float(v)] for k, v in actual]
+            expected = [[k, v if isinstance(v, basestring) else float(v)] for k, v in actual]
+            if actual == expected:
                 break
             else:
                 logger("Class {} was constructed but the underlying proj4 "
                        "string wasn't identical:\nExpected:\t{}"
-                       "\nActual:\t{}".format(projection, crs.proj4_init, proj4_str))
+                       "\nActual:\t{}".format(projection, expected, actual))
         else:
             raise ValueError('No projection can currently handle this combination of proj4 parameters.\n' 
                              'Required parameters: {} for the projection {}. Original proj4 string:\n{}'
@@ -1125,9 +1133,6 @@ class LambertConformal(Projection):
 
     """
     _proj4_proj = 'lcc'
-#    PROJ4_1TO1 = Projection.PROJ4_1TO1.copy()
-#    PROJ4_1TO1.update({'lat_1': 'secant_latitudes0',
-#                       'lat_2': 'secant_latitudes1'})
     
     @classmethod
     def _proj4_params_to_cartopy(cls, params):
@@ -1147,6 +1152,12 @@ class LambertConformal(Projection):
                 processeds.pop(params.index(param))
                 params.pop(params.index(param))
         if secant_latitudes != [None, None]:
+            for index, default in enumerate([33, 45]):
+                if isinstance(secant_latitudes[index], basestring):
+                    secant_latitudes[index] = float(secant_latitudes[index])
+#                if secant_latitudes[index] is None:
+#                    secant_latitudes[index] = default
+
             params.insert(index, ['secant_latitudes', tuple(secant_latitudes)])
             processeds.insert(index, True)
 
