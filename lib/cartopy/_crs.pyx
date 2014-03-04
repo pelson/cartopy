@@ -130,7 +130,8 @@ class Globe(object):
                   'datum': 'datum',
                   'a': 'semimajor_axis',
                   'b': 'semiminor_axis',
-                  'towgs84': 'towgs84'}
+                  'towgs84': 'towgs84',
+                  'nadgrids': 'nadgrids'}
 
     UNPARAMETERISED = []
 
@@ -173,6 +174,7 @@ class Globe(object):
                         print 'UNHANDLED:', param
         return 'Globe({})'.format(', '.join(['{}={}'.format(*arg_item) for arg_item in args]))
 
+
 cdef class CRS:
     """
     Defines a Coordinate Reference System using proj.4.
@@ -196,9 +198,9 @@ cdef class CRS:
         self.proj4_params = self.globe.to_proj4_params()
         self.proj4_params.update(proj4_params)
 
-        init_items = ['+{}={}'.format(k, v) for
+        init_items = ['+{}={:}'.format(k, v) for
                       k, v in self.proj4_params.items()]
-        self.proj4_init = ' '.join(init_items) + ' +no_defs'
+        self.proj4_init = ' '.join(init_items) + ' +wktext +no_defs'
         self.proj4 = pj_init_plus(self.proj4_init)
         if not self.proj4:
             raise Proj4Error()
