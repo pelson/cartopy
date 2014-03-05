@@ -28,8 +28,26 @@ if LOGGER.level == logging.NOTSET:
 if not LOGGER.handlers:
     LOGGER.addHandler(logging.StreamHandler())
 
+#: Maps proj4 parameters to *names*. Note that there is no guarantee that the
+#: values can be mapped 1-to-1. For example, o_lat_p in RotatedPole follows
+#: o_lat_p == 180 + pole_longitude.
+PROJ4_PARAM_TO_NAME = {'lon_0': 'central_longitude',
+                       'lat_0': 'central_latitude',
+                       'x_0': 'false_easting',
+                       'y_0': 'false_northing',
+                       'h': 'satellite_height',
+                       'k': 'scale_factor',
+                       'k_0': 'scale_factor',
+                       'lat_ts': 'true_scale_latitude',
+                       'o_lat_p': 'pole_latitude',
+                       }
+
 
 def from_proj4(proj4_str):
+    """
+    Docstring
+
+    """
     from cartopy._crs import CRS, Globe
     import inspect
 
@@ -202,7 +220,7 @@ def _remove_default_params(cls, params):
             params.remove([name, value])
 
 
-def _compute_unparam(parent_cls, init_defaults, kwargs_passed_to_super):
+def _compute_unparam(parent_cls, init_defaults, kwargs_passed_to_super=None):
     parent = parent_cls
     try:
         inherited_unparam = parent._proj4_unparameterised.copy()
@@ -211,12 +229,11 @@ def _compute_unparam(parent_cls, init_defaults, kwargs_passed_to_super):
     _proj4_unparameterised = inherited_unparam
 
     # Get the defaults from the parent class' init:
-    try:
-        defaults = parent._defaults()
-    except AttributeError:
-        defaults = {}
+    argspec = inspect.getargspec(parent_cls.__init__)
+    defaults = dict(zip(argspec.args[1:],
+                    argspec.defaults or []))
     
-    for kwarg in kwargs_passed_to_super:
+    for kwarg in (kwargs_passed_to_super or {}):
         del defaults[kwarg]
 
     _proj4_unparameterised.update(defaults)

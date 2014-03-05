@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with cartopy.  If not, see <http://www.gnu.org/licenses/>.
 import mock
-from nose.tools import assert_raises_regexp, assert_true
+from nose.tools import assert_raises_regexp, assert_true, assert_equal
 
 import cartopy.crs as ccrs
 
@@ -59,8 +59,16 @@ def test_no_proj(logger):
     with assert_raises_regexp(ValueError, msg):
         ccrs.from_proj4('+no_defs')
 
-    # No log messages needed - the error should suffice.    
+    # No log messages needed - the error should suffice.
     assert_true(not logger.info.called)
+
+
+def test_complex_proj4_str():
+    proj4_str = ('+ellps=WGS84 +proj=ob_tran +o_proj=latlon +o_lon_p=0 '
+                 '+o_lat_p=90.0 +lon_0=200.1 +to_meter=0.0174532 '
+                 '+wktext +no_defs')
+    assert_equal(ccrs.from_proj4(proj4_str),
+                 ccrs.RotatedPole(pole_longitude=20.1))
 
 
 if __name__ == '__main__':

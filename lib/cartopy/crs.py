@@ -31,7 +31,7 @@ from shapely.geometry.polygon import LinearRing
 from shapely.prepared import prep
 
 from cartopy._crs import CRS, Geocentric, Geodetic, Globe, PROJ4_RELEASE
-from cartopy._proj4 import _remove_unparameterised, _proj4_str_to_params, from_proj4, _remove_default_params, _compute_unparam
+from cartopy._proj4 import _remove_unparameterised, _proj4_str_to_params, from_proj4, _remove_default_params, _compute_unparam, PROJ4_PARAM_TO_NAME
 import cartopy.trace
 
 
@@ -133,22 +133,11 @@ class Projection(CRS):
         import cartopy.mpl.geoaxes as geoaxes
         return geoaxes.GeoAxes, {'map_projection': self}
 
-    PROJ4_1TO1 = {'lon_0': 'central_longitude',
-                  'lat_0': 'central_latitude',
-                  'x_0': 'false_easting',
-                  'y_0': 'false_northing',
-                  'h': 'satellite_height',
-                  'k': 'scale_factor',
-                  'k_0': 'scale_factor',
-                  'lat_ts': 'true_scale_latitude'}
-    # TODO: This can be automatic - we know what the default arguments are, and we know what
-    # we want to pass. All we need to do then is have a record of unparameterised keys and
-    # their associated value
-#    UNPARAMETERISED = ['units']
     #: Maps proj4 parameters to automatically filled values
     #: for this Projection.
     _proj4_unparameterised = {'scale_factor': 1.0, 'units': 'm'}
     _default_globe_repr = "Globe(ellipse='WGS84')"
+    #: The "proj" crs name as defined by proj4.
     _proj4_proj = None
 
     def __repr__(self):
@@ -159,42 +148,13 @@ class Projection(CRS):
         processeds = [False] * len(params)
         for index, param in enumerate(params[:]):
             name, _ = param
-            if name in cls.PROJ4_1TO1:
-                param[0] = cls.PROJ4_1TO1[name]
+            if hasattr(cls, '_PROJ4_param_special_case') and name in cls._PROJ4_param_special_case:
+                param[0] = cls._PROJ4_param_special_case[name]
+                processeds[index] = True
+            elif name in PROJ4_PARAM_TO_NAME:
+                param[0] = PROJ4_PARAM_TO_NAME[name]
                 processeds[index] = True
         return params, processeds
-
-    @classmethod
-    def _inherited_defaults(cls):
-        """
-        Return the defaults for each keyword in the class.
-        
-        >>> import cartopy.crs as ccrs
-        >>> print ccrs.OSGB()._inherited_defaults()
-        blah.
-
-        """
-        import inspect
-        defaults = {}
-        for klass in cls.mro()[::-1][-1:]:
-            if issubclass(klass, Projection) and klass is not Projection:
-                argspec = inspect.getargspec(klass.__init__)
-                defaults.update(dict(zip(argspec.args[1:],
-                                         argspec.defaults or [])))
-        return defaults
-
-    @classmethod
-    def _defaults(cls):
-        return cls._inherited_defaults()
-
-    @staticmethod
-    def from_proj4(proj4_str):
-        """
-        Given a proj4 string, return a CRS class instance,
-        or raise an exception.
-
-        """
-        return from_proj4(proj4_str)
 
     def from_proj4_wibble(self, proj4_str):
         """Given a proj4 string, return a class repr"""
@@ -985,6 +945,10 @@ class Mercator(Projection):
 
 
 class LambertCylindrical(_RectangularProjection):
+    _proj4_proj = 'cea'
+    _default_globe_repr = ("Globe(ellipse='WGS84', "
+                           "semimajor_axis=57.2957795131)")
+
     def __init__(self, central_longitude=0.0):
         proj4_params = [('proj', 'cea'), ('lon_0', central_longitude)]
         globe = Globe(semimajor_axis=math.degrees(1))
@@ -1120,6 +1084,10 @@ class LambertConformal(Projection):
 
 
 class Miller(_RectangularProjection):
+    _proj4_proj = 'mill'
+    _default_globe_repr = ("Globe(ellipse='WGS84', "
+                           "semimajor_axis=57.2957795131)")
+
     def __init__(self, central_longitude=0.0):
         proj4_params = [('proj', 'mill'), ('lon_0', central_longitude)]
         globe = Globe(semimajor_axis=math.degrees(1))
@@ -1133,15 +1101,11 @@ class Miller(_RectangularProjection):
 
 class RotatedPole(_CylindricalProjection):
     _proj4_proj = 'ob_tran'
-
-    PROJ4_1TO1 = _CylindricalProjection.PROJ4_1TO1.copy()
-    PROJ4_1TO1.update({'o_lat_p': 'pole_latitude',
-                       'lon_0': 'pole_longitude'})
-
-    _proj4_unparameterised = _CylindricalProjection._proj4_unparameterised.copy()
-    _proj4_unparameterised.update({'to_meter': math.radians(1),
-                                   'o_lon_p': 0, 'o_lat_p': 90.0,
-                                   'o_proj': 'latlon'})
+    _PROJ4_param_special_case = {'lon_0': 'pole_longitude'}
+    _proj4_unparameterised = _compute_unparam(_CylindricalProjection,
+                                              {'to_meter': math.radians(1),
+                                               'o_lon_p': 0, 'o_lat_p': 90.0,
+                                               'o_proj': 'latlon'})
 
     def __init__(self, pole_longitude=0.0, pole_latitude=90.0, globe=None):
         proj4_params = [('proj', 'ob_tran'), ('o_proj', 'latlon'),
@@ -1164,6 +1128,8 @@ class RotatedPole(_CylindricalProjection):
 
 
 class Gnomonic(Projection):
+    _proj4_proj = 'gnom'
+
     def __init__(self, central_latitude=0.0, globe=None):
         proj4_params = [('proj', 'gnom'), ('lat_0', central_latitude)]
         super(Gnomonic, self).__init__(proj4_params, globe=globe)
@@ -1188,9 +1154,6 @@ class Gnomonic(Projection):
 
 class Stereographic(Projection):
     _proj4_proj = 'stere'
-#    _proj4_unparameterised = Stereographic._proj4_unparameterised.copy()
-#    _proj4_unparameterised.update({'central_latitude': 0,
-#                                   'central_longitude': 0, })
 
     def __init__(self, central_latitude=0.0, central_longitude=0.0,
                  false_easting=0.0, false_northing=0.0,
@@ -1265,16 +1228,6 @@ class SouthPolarStereo(Stereographic):
     _proj4_unparameterised = _compute_unparam(Stereographic,
                                               {'central_latitude': -90},
                                               ['central_longitude', 'globe'])
-    
-#    _proj4_unparameterised = Stereographic._proj4_unparameterised.copy()
-#    _proj4_unparameterised.update(Stereographic._defaults())
-#    _proj4_unparameterised.pop('central_longitude')
-#    _proj4_unparameterised.pop('globe')
-#    _proj4_unparameterised.update({'central_latitude': -90})
-    # TODO - unparameterised should know about Stereographic's default "false_easting".
-#    _proj4_unparameterised.update()
-#    Stereographic._inherit_unparameterised_from_defaults(exclude=['central_longitude',
-#                                                                  'globe'])
 
     def __init__(self, central_longitude=0.0, globe=None):
         super(SouthPolarStereo, self).__init__(
@@ -1283,6 +1236,8 @@ class SouthPolarStereo(Stereographic):
 
 
 class Orthographic(Projection):
+    _proj4_proj = 'ortho'
+
     def __init__(self, central_longitude=0.0, central_latitude=0.0,
                  globe=None):
         proj4_params = [('proj', 'ortho'), ('lon_0', central_longitude),
@@ -1350,6 +1305,8 @@ class _WarpedRectangularProjection(Projection):
 
 
 class Mollweide(_WarpedRectangularProjection):
+    _proj4_proj = 'moll'
+
     def __init__(self, central_longitude=0, globe=None):
         proj4_params = [('proj', 'moll'), ('lon_0', central_longitude)]
         super(Mollweide, self).__init__(proj4_params, central_longitude,
@@ -1361,6 +1318,8 @@ class Mollweide(_WarpedRectangularProjection):
 
 
 class Robinson(_WarpedRectangularProjection):
+    _proj4_proj = 'robin'
+
     def __init__(self, central_longitude=0, globe=None):
         # Warn when using Robinson with proj4 4.8 due to discontinuity at
         # 40 deg N introduced by incomplete fix to issue #113 (see
@@ -1441,6 +1400,8 @@ class Robinson(_WarpedRectangularProjection):
 
 
 class InterruptedGoodeHomolosine(Projection):
+    _proj4_proj = 'igh'
+
     def __init__(self, central_longitude=0, globe=None):
         proj4_params = [('proj', 'igh'), ('lon_0', central_longitude)]
         super(InterruptedGoodeHomolosine, self).__init__(proj4_params,
@@ -1517,8 +1478,8 @@ class InterruptedGoodeHomolosine(Projection):
 
 class Geostationary(Projection):
     _proj4_proj = 'geos'
-    _proj4_unparameterised = Stereographic._proj4_unparameterised.copy()
-    _proj4_unparameterised.update({'central_latitude': 0})
+    _proj4_unparameterised = _compute_unparam(Stereographic,
+                                              {'central_latitude': 0})
 
     def __init__(self, central_longitude=0.0, satellite_height=35785831,
                  false_easting=0, false_northing=0, globe=None):

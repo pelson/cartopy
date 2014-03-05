@@ -221,7 +221,17 @@ class TestBackFromProj4(unittest.TestCase):
              'Geostationary(satellite_height=500)',
              'EuroPP()',
              'LambertConformal()',
-             'LambertConformal(secant_latitudes=(1, -40))']
+             'LambertConformal(secant_latitudes=(1, -40))',
+             'Geostationary(satellite_height=102.2)',
+             'InterruptedGoodeHomolosine(central_longitude=-200)',
+             'Robinson()',
+             'Mollweide()',
+             'Orthographic(central_latitude=53)',
+             'Gnomonic()',
+             'Miller()',
+             "Mollweide(globe=Globe(ellipse='airy'))",
+             'LambertCylindrical()'
+             ]
 
     def test_repr(self):
         # Test that we can construct a CRS's repr and it is equivalent to the
