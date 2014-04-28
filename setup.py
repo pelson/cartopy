@@ -169,6 +169,13 @@ setup(
                   language='c++',
                   **extra_extension_args
                   ),
+        Extension('cartopy.clipper._clipper', ['lib/cartopy/clipper/_clipper.pyx', 'lib/cartopy/clipper/clipper.cpp'],
+                  include_dirs=[get_config_var('INCLUDEDIR'), './lib/cartopy'],
+                  #libraries=['clipper'],
+                  library_dirs=[get_config_var('LIBDIR')],
+                  language='c++',
+                  **extra_extension_args
+                  ),
         Extension('cartopy._crs', ['lib/cartopy/_crs.pyx'],
                   include_dirs=[get_config_var('INCLUDEDIR'), np.get_include()],
                   libraries=['proj'],

@@ -204,7 +204,7 @@ def path_to_geos(path, force_ccw=False):
             collection[-1][1].append(geom.exterior)
         else:
             collection.append((geom, []))
-
+    print 'Segments done'
     # Convert each (external_geom, [internal_polygons]) pair into a
     # a shapely Polygon that encapsulates the internal polygons, if the
     # external geom is a LineSting leave it alone.

@@ -100,7 +100,9 @@ class FeatureArtist(matplotlib.artist.Artist):
             extent = ax.get_extent(feature_crs)
         except ValueError:
             warnings.warn('Unable to determine extent. Defaulting to global.')
+        print 'Requesting intersecting'
         geoms = self._feature.intersecting_geometries(extent)
+        print 'Got intersecting'
 
         # Project (if necessary) and convert geometries to matplotlib paths.
         paths = []
@@ -119,16 +121,22 @@ class FeatureArtist(matplotlib.artist.Artist):
                     projected_geom)
                 mapping[key] = geom_paths
             paths.extend(geom_paths)
-
+        print 'paths computed'
         # Build path collection and draw it.
         transform = ax.projection._as_mpl_transform(ax)
         # Combine all the keyword args in priority order
         final_kwargs = dict(self._feature.kwargs)
         final_kwargs.update(self._kwargs)
         final_kwargs.update(kwargs)
+        print 'Collection being created'
         c = matplotlib.collections.PathCollection(paths,
                                                   transform=transform,
                                                   **final_kwargs)
+        print 'Collection has been created'
         c.set_clip_path(ax.patch)
+        print 'Collection clip path'
         c.set_figure(ax.figure)
-        return c.draw(renderer)
+        print 'Drawing'
+        r = c.draw(renderer)
+        print 'Drawn'
+        return r

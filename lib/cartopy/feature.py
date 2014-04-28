@@ -140,6 +140,9 @@ class ShapelyFeature(Feature):
 
     def geometries(self):
         return iter(self._geoms)
+    
+    def intersecting_geometries(self, extent):
+        return self.geometries()
 
 
 class NaturalEarthFeature(Feature):
