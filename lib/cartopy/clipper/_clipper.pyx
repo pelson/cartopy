@@ -28,57 +28,56 @@ cdef extern from "clipper.hpp" namespace "ClipperLib":
         pftPositive=3,
         pftNegative=4
     
-    ctypedef signed long long long64
-    ctypedef unsigned long long ulong64
+    ctypedef signed long long cInt
     ctypedef char bool 
 
     cdef struct IntPoint:
-        long64 X
-        long64 Y
+        cInt X
+        cInt Y
 
-    cdef cppclass Polygon:
-        Polygon()
+    cdef cppclass Path:
+        Path()
         void push_back(IntPoint&)
         IntPoint& operator[](int)
         IntPoint& at(int)
         int size()
         
-    cdef cppclass Polygons:
-        Polygons()
-        void push_back(Polygon&)
-        Polygon& operator[](int)
-        Polygon& at(int)
+    cdef cppclass Paths:
+        Paths()
+        void push_back(Path&)
+        Path& operator[](int)
+        Path& at(int)
         int size()
 
-    void SimplifyPolygon(Polygon in_poly, Polygons out_polys)
-    void SimplifyPolygons(Polygons in_polys, Polygons out_polys)
-    void SimplifyPolygons(Polygons polys)
+    void SimplifyPolygon(Path in_poly, Paths out_polys)
+    void SimplifyPolygons(Paths in_polys, Paths out_polys)
+    void SimplifyPolygons(Paths polys)
 
 
     cdef cppclass Clipper:
         Clipper()
         #~Clipper()
-        bool Run(ClipType clipType, Polygons solution, PolyFillType subjFillType, PolyFillType clipFillType)
+        bool Run(ClipType clipType, Paths solution, PolyFillType subjFillType, PolyFillType clipFillType)
         void Clear()
         
-        bool AddPolygon( Polygon pg, PolyType polyType)
-        bool AddPolygons( Polygons ppg, PolyType polyType)
+        bool AddPath( Path pg, PolyType polyType, bool closed)
+        bool AddPaths( Paths ppg, PolyType polyType, bool closed)
         void Clear()
 
 
 def simplify_polygons(pypolygons):
     print "SimplifyPolygons "
-    cdef Polygon poly =  Polygon() 
+    cdef Path poly =  Path() 
     cdef IntPoint a
-    cdef Polygons polys =  Polygons()
+    cdef Paths polys =  Paths()
     for pypolygon in pypolygons:
         for pypoint in pypolygon:
             a = IntPoint(pypoint[0], pypoint[1])
             poly.push_back(a)
         polys.push_back(poly)  
 
-    cdef Polygons solution
-    SimplifyPolygons( polys, solution)
+    cdef Paths solution
+    SimplifyPolygons(polys, solution)
     n = solution.size()
     sol = []
 
@@ -98,13 +97,13 @@ def simplify_mpl_vertices(vertices):
     """
     Removes any self intersecting polygons so that the resulting polygons are strictly simple (not strictly yet).
     """
-    cdef Polygon poly =  Polygon() 
+    cdef Path poly =  Path() 
     cdef IntPoint a
     for x, y in vertices:
         a = IntPoint(x, y)
         poly.push_back(a)
 
-    cdef Polygons solution
+    cdef Paths solution
     SimplifyPolygon(poly, solution)
     n = solution.size()
     sol = []
@@ -138,33 +137,33 @@ cdef class Pyclipper:
 
     #===========================================================
     #bool AddPolygon(Polygon pg, PolyType polyType)
-    def add_polygon(self, pypolygon):
+    def add_path(self, pypolygon):
         print "Adding polygon"
 
-        cdef Polygon square =  Polygon() 
+        cdef Path square =  Path() 
         cdef IntPoint a
         for p in pypolygon:
             a = IntPoint(p[0], p[1])
             square.push_back(a)
 
-        cdef Polygons subj =  Polygons() 
+        cdef Paths subj =  Paths() 
         subj.push_back(square)  
-        self.thisptr.AddPolygons(subj, ptSubject)
+        self.thisptr.AddPaths(subj, ptSubject, 0)
 
 
     #===========================================================
-    #bool AddPolygon(Polygon pg, PolyType polyType)
+    #bool AddPath(Path pg, PolyType polyType)
     def sub_polygon(self, pypolygon):
         print "Sub polygon"
-        cdef Polygon square =  Polygon() 
+        cdef Path square =  Path() 
         cdef IntPoint a
         for p in pypolygon:
             a = IntPoint(p[0], p[1])
             square.push_back(a)
 
-        cdef Polygons subj =  Polygons() 
+        cdef Paths subj =  Paths() 
         subj.push_back(square)  
-        self.thisptr.AddPolygons(subj, ptClip)
+        self.thisptr.AddPaths(subj, ptClip, 0)
         
     def test(self):
         import random

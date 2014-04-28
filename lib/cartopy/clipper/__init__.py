@@ -18,3 +18,5 @@ def main():
     #ax = plt.gca()
     #ax.add_patch(PathPatch(path),)
     #plt.show()
+if __name__ == '__main__':
+    main()
