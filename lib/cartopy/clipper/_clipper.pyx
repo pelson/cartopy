@@ -1,33 +1,8 @@
-import sys
-import struct
-from ctypes import *
-import copy
-import unicodedata
-import time
-from cython import *
-
-from cython.operator cimport dereference as deref
-
-from libcpp.vector cimport vector
+import numpy as np
+cimport numpy as np
 
         
 cdef extern from "clipper.hpp" namespace "ClipperLib":
-    cdef enum ClipType:
-        ctIntersection= 1,
-        ctUnion=2,
-        ctDifference=3,
-        ctXor=4
-    
-    cdef enum PolyType:
-        ptSubject= 1,
-        ptClip=2
-
-    cdef enum PolyFillType:
-        pftEvenOdd= 1,
-        pftNonZero=2,
-        pftPositive=3,
-        pftNegative=4
-    
     ctypedef signed long long cInt
     ctypedef char bool 
 
@@ -39,149 +14,81 @@ cdef extern from "clipper.hpp" namespace "ClipperLib":
         Path()
         void push_back(IntPoint&)
         IntPoint& operator[](int)
-        IntPoint& at(int)
         int size()
         
     cdef cppclass Paths:
         Paths()
         void push_back(Path&)
         Path& operator[](int)
-        Path& at(int)
         int size()
 
-    void SimplifyPolygon(Path in_poly, Paths out_polys)
-    void SimplifyPolygons(Paths in_polys, Paths out_polys)
     void SimplifyPolygons(Paths polys)
 
 
-    cdef cppclass Clipper:
-        Clipper()
-        #~Clipper()
-        bool Run(ClipType clipType, Paths solution, PolyFillType subjFillType, PolyFillType clipFillType)
-        void Clear()
-        
-        bool AddPath( Path pg, PolyType polyType, bool closed)
-        bool AddPaths( Paths ppg, PolyType polyType, bool closed)
-        void Clear()
-
-
-def simplify_polygons(pypolygons):
-    print "SimplifyPolygons "
-    cdef Path poly =  Path() 
-    cdef IntPoint a
-    cdef Paths polys =  Paths()
-    for pypolygon in pypolygons:
-        for pypoint in pypolygon:
-            a = IntPoint(pypoint[0], pypoint[1])
-            poly.push_back(a)
-        polys.push_back(poly)  
-
-    cdef Paths solution
-    SimplifyPolygons(polys, solution)
+cdef clipper_to_mpl(Paths clipper_paths, scale_factor=10**5):
+    solution = clipper_paths
     n = solution.size()
-    sol = []
-
     cdef IntPoint point
+    
+    solution_paths = [] 
     for i in range(n):
-        poly = solution[i]
-        m = poly.size()
-        loop = []
-        for i in range(m):
-            point = poly[i]
-            loop.append([point.X ,point.Y])
-        sol.append(loop)
-    return sol
+        solution_clpath = solution[i]
+        m = solution_clpath.size()
+        # Make the solution longer by one - Clipper has done *polygon* simplification,
+        # so we need to put the final vertex equal to the first for mpl.
+        solution_path = np.empty([m + 1, 2], dtype=np.float32)
+        solution_paths.append(solution_path)
+        for j in range(m):
+            solution_path[j, 0] = float(solution_clpath[j].X) / scale_factor
+            solution_path[j, 1] = float(solution_clpath[j].Y) / scale_factor
+        else:
+            solution_path[m, 0] = float(solution_clpath[0].X) / scale_factor
+            solution_path[m, 1] = float(solution_clpath[0].Y) / scale_factor
+    return solution_paths
 
 
-def simplify_mpl_vertices(vertices):
-    """
-    Removes any self intersecting polygons so that the resulting polygons are strictly simple (not strictly yet).
-    """
-    cdef Path poly =  Path() 
+cdef Paths mpl_to_clipper(path, scale_factor=10**5):
+    cdef Paths clipper_path
+    cdef Path sub_clipper_path
+    cdef int i
     cdef IntPoint a
-    for x, y in vertices:
-        a = IntPoint(x, y)
-        poly.push_back(a)
-
-    cdef Paths solution
-    SimplifyPolygon(poly, solution)
-    n = solution.size()
-    sol = []
-
-    cdef IntPoint point
-    for i in range(n):
-        poly = solution[i]
-        m = poly.size()
-        loop = []
-        for i in range(m):
-            point = poly[i]
-            loop.append([point.X ,point.Y])
-        sol.append(loop)
-    return sol
-
-
-
-cdef class Pyclipper:
-    cdef Clipper *thisptr      # hold a C++ instance which we're wrapping
-    error_code = {-1:"UNSPECIFIED_ERROR", -2: "BAD_TRI_INDEX", -3:"NO_VOX_MAP", -4:"QUERY_FAILED"}
-
-    #===========================================================
-    def __cinit__(self):
-        print "Creating a Clipper"
-        self.thisptr = new Clipper()
-
-    #===========================================================
-    def __dealloc__(self):
-        print "Deleting a Clipper"
-        del self.thisptr
-
-    #===========================================================
-    #bool AddPolygon(Polygon pg, PolyType polyType)
-    def add_path(self, pypolygon):
-        print "Adding polygon"
-
-        cdef Path square =  Path() 
-        cdef IntPoint a
-        for p in pypolygon:
-            a = IntPoint(p[0], p[1])
-            square.push_back(a)
-
-        cdef Paths subj =  Paths() 
-        subj.push_back(square)  
-        self.thisptr.AddPaths(subj, ptSubject, 0)
-
-
-    #===========================================================
-    #bool AddPath(Path pg, PolyType polyType)
-    def sub_polygon(self, pypolygon):
-        print "Sub polygon"
-        cdef Path square =  Path() 
-        cdef IntPoint a
-        for p in pypolygon:
-            a = IntPoint(p[0], p[1])
-            square.push_back(a)
-
-        cdef Paths subj =  Paths() 
-        subj.push_back(square)  
-        self.thisptr.AddPaths(subj, ptClip, 0)
+    vertices = path.vertices * scale_factor
+    codes = path.codes
+    
+    clipper_path = Paths()
+    sub_clipper_path = Path()
+    
+    for i in xrange(len(path)):
+        code = codes[i]
+        vertex = vertices[i]
         
-    def test(self):
-        import random
-        shapes = []
+        if code == 1: # moveto
+            if sub_clipper_path.size() > 0:
+                clipper_path.push_back(sub_clipper_path)
+            sub_clipper_path = Path()
+        elif code == 79: # closepoly
+            if sub_clipper_path.size() > 0:
+                clipper_path.push_back(sub_clipper_path)
+            sub_clipper_path = Path()
+        elif code == 0: # stop
+            if sub_clipper_path.size() > 0:
+                clipper_path.push_back(sub_clipper_path)
+            break
+        elif code == 2:
+            pass
+        else:
+            raise ValueError('Unsupported Path code.')
+        
+        a = IntPoint(vertex[0], vertex[1])
+        sub_clipper_path.push_back(a)
+    else:
+        if sub_clipper_path.size() > 0:
+            clipper_path.push_back(sub_clipper_path)
+    return clipper_path
 
-        shape = []
-        for i in range(3):
-            p = [500+int(1000*random.random()), 500+int(1000*random.random())]
-            shape.append(p)
-        shapes.append(shape)
-        
-        for i in range(3):
-            p = [500+int(1000*random.random()), 500+int(1000*random.random())]
-            shape.append(p)
-        shapes.append(shape)
-        
-        shapes = simplify_polygons(shapes)
-        print shapes
-        print 'bar.'
-        return
-        
+
+def simplify_mpl_path(path, scale_factor=10**5):
+    """Remove self intersections into multiple paths."""
+    cdef Paths clipper_paths = mpl_to_clipper(path, scale_factor=scale_factor)
+    SimplifyPolygons(clipper_paths)
+    return clipper_to_mpl(clipper_paths, scale_factor=scale_factor)
