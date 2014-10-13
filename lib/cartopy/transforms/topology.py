@@ -93,9 +93,14 @@ class LineToLine(TopologyTransformation):
         # dtype to deal with a shapely bug.
         c = np.array([p0, p1], dtype=float)
         ls = sgeom.LineString(c)
-        cline = sgeom.LineString(self.line)
-        if cline.contains(ls):
-            return [self.p0]
+        rline = sgeom.LineString(self.replacement_line)
+        if rline.intersects(ls):
+            intersection = ls.intersection(rline)
+            if isinstance(intersection, sgeom.Point):
+                raise NotImplementedError()
+            elif isinstance(intersection, sgeom.LineString):
+                # XXX TODO: verify that the segment is a subset of the cut line.
+                return ['PLACEHOLDER']
         else:
             return None
 
@@ -162,27 +167,27 @@ if __name__ == '__main__':
 #     print handle_segment([0, 80], [0, 100],
 #                          [PointToLine([0, 90], [[-180, 90], [180, 90]])])
 # 
-#     # Single point intersection.
-#     print handle_segment([-190, 80], [-170, 70],
-#                          [CutLine([[-180, -90], [-180, 90]])])
-# 
-#     # Single point intersection.
-#     print handle_segment([170, 20], [190, 10],
-#                          [CutLine([[180, -90], [180, 90]])])
-# 
-#     # Along cut line.
-#     print handle_segment([-180, 60], [-180, 80],
-#                          [CutLine([[-180, -90], [-180, 90]])])
-# 
-#     # No impact.
-#     print handle_segment([-160, 60], [-150, 80],
-#                          [CutLine([[-180, -90], [-180, 90]])])
+    # Single point intersection.
+    print handle_segment([-190, 80], [-170, 70],
+                         [CutLine([[-180, -90], [-180, 90]])])
+
+#    # Single point intersection.
+#    print handle_segment([170, 20], [190, 10],
+#                         [CutLine([[180, -90], [180, 90]])])
+#
+#    # Along cut line.
+#    print handle_segment([-180, 60], [-180, 80],
+#                         [CutLine([[-180, -90], [-180, 90]])])
+#
+#    # No impact.
+#    print handle_segment([-160, 60], [-150, 80],
+#                         [CutLine([[-180, -90], [-180, 90]])])
 
     # Single point intersection.
     print handle_inverse_segment([10, 90], [40, 90],
                                  [PointToLine([0, 90], [[-180, 90], [180, 90]])])
 
-    print handle_inverse_segment([10, 90], [40, 90],
-                                 [CutLine([[-180, 90], [180, 90]])])
+    print handle_inverse_segment([-180, 40], [-180, 55],
+                                 [CutLine([[-180, -90], [-180, 90]])])
 
 
