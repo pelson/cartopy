@@ -21,12 +21,12 @@ def great_circle_interpolation(p0, p1):
     kx1 = cy1 * np.cos(x1)
     ky1 = cy1 * np.sin(x1)
     d = 2 * np.arcsin(np.sqrt(haversin(y1 - y0) + cy0 * cy1 * haversin(x1 - x0)))
-    k = 1 / np.sin(d)
+    k = 1. / np.sin(d)
 
     def interpolator(t):
         # XXX B was (t *= d) - what is that?
         B = np.sin(t * d) * k
-        A = np.sin(d - t) * k
+        A = np.sin(d - (t * d)) * k
         x = A * kx0 + B * kx1
         y = A * ky0 + B * ky1
         z = A * sy0 + B * sy1

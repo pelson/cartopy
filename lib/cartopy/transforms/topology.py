@@ -162,7 +162,7 @@ def handle_inverse_segment(p0, p1, topology):
     return None
 
 
-if __name__ == '__main__':
+def simple_cases():
 #     # Single point intersection.
 #     print handle_segment([0, 80], [0, 100],
 #                          [PointToLine([0, 90], [[-180, 90], [180, 90]])])
@@ -191,3 +191,11 @@ if __name__ == '__main__':
                                  [CutLine([[-180, -90], [-180, 90]])])
 
 
+
+#def cut():
+
+
+
+if __name__ == '__main__':
+    pass
+    
