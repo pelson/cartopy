@@ -470,7 +470,7 @@ class Geodetic(CRS):
     geographical distance and coordinates are measured in degrees.
 
     """
-    def __init__(self, globe=None):
+    def __init__(self, lat_rotation=0, lon_rotation=0, globe=None):
         """
         Kwargs:
 

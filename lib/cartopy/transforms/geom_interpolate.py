@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import interpolate
 import numpy as np
-
+import matplotlib.path as mpath
 
 
 def to_cartesian(spherical_p):
@@ -37,6 +37,11 @@ def distance_squared_3d(p0, p1):
 
 def _segment_split(coords, interpolator, project_fn, t, p0, p1,
                    cart_p0, cart_p1, depth, precision):
+    """
+    Interpolate between the given coordinates until the given precision
+    is attained.
+
+    """
     # TODO: Consider angular distance (as per d3) as well?
 
     if depth > 16:
@@ -92,7 +97,7 @@ class Precision(object):
         self.angular_distance_squared = np.cos(np.deg2rad(min_angular_distance))
 
 
-def interpolate_and_project_path(path, interpolator_creation_fn, precision):
+def interpolate_and_project_path(path, project_fn, interpolator_creation_fn, precision):
     # NOTE: This algorithm is pretty dumb and may well lead to some cases of un-preserved geometry
     # when a poor precision is used.
     verts = []
@@ -124,7 +129,7 @@ def interpolate_and_project_path(path, interpolator_creation_fn, precision):
 
 
 if __name__ == '__main__':
-    import matplotlib.path as mpath
+    
     import cartopy.crs as ccrs
     from functools import partial
 
@@ -148,6 +153,7 @@ if __name__ == '__main__':
 
     path = mpath.Path([[-180, 90], [0, 90], [180, 90], [180, 0], [180, -90],
                        [0, -90], [-180, -90], [-180, 0], [-180, 90]])
+
 
     # NPS
 #    path = mpath.Path([[180, -90], [-90, -90], [0, -90], [90, -90], [180, -90]])
@@ -209,7 +215,7 @@ if __name__ == '__main__':
     project_fn = partial(transform_point, src_crs=ccrs.Geodetic())
     result = []
 
-    new_path = interpolate_and_project_path(path, interpolate.great_circle_interpolation, precision=Precision(precision, 30))
+    new_path = interpolate_and_project_path(path, project_fn, interpolate.great_circle_interpolation, precision=Precision(precision, 30))
 
     if do_africa:
         # Africa
@@ -228,7 +234,7 @@ if __name__ == '__main__':
         africa = cpatch.geos_to_path(cascaded_union(shapes))
         africa = mpath.Path.make_compound_path(*africa)
 
-        africa_interp = interpolate_and_project_path(africa, interpolate.great_circle_interpolation, precision=Precision(precision, 30))
+        africa_interp = interpolate_and_project_path(africa, project_fn, interpolate.great_circle_interpolation, precision=Precision(precision, 30))
 
 
     import matplotlib.pyplot as plt

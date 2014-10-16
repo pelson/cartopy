@@ -41,8 +41,9 @@ class PointToLine(TopologyTransformation):
         c = np.array([p0, p1], dtype=float)
         ls = sgeom.LineString(c)
         if ls.intersects(sgeom.Point(self.p0)):
-            return [[p0, self.p0, 'PLACEHOLDER'],
-                    ['PLACEHOLDER', self.p0, p1]]
+            return [[p0, self.p0],#, 'PLACEHOLDER'],
+#                    ['PLACEHOLDER', 
+                     [self.p0, p1]]
         else:
             return None# [[p0, p1]]
     
@@ -79,8 +80,10 @@ class LineToLine(TopologyTransformation):
             intersection = ls.intersection(cline)
             if isinstance(intersection, sgeom.Point):
                 r = [intersection.x, intersection.y]
-                return [[p0, r, 'PLACEHOLDER'],
-                        ['PLACEHOLDER', r, p1]]
+                return [[p0, r,],
+                        # 'PLACEHOLDER'],
+#                        ['PLACEHOLDER', 
+                         [r, p1]]
             else:
                 # Verfiy this is just the exterior???
                 return [[p0, p1]]
