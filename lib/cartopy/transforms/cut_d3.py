@@ -54,8 +54,7 @@ class SphericalPolygonCutter():
 
     def cut_antimeridian(self):
         pass
-
-"""
+        r = """
 function d3_geo_clipAntimeridianLine(listener) {
   var λ0 = NaN,
       φ0 = NaN,

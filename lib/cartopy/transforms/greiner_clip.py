@@ -1,22 +1,4 @@
-# -*- coding: UTF-8 -*-
-# Efficient Clipping of Arbitrary Polygons
-#
-# Copyright (c) 2011, 2012 Helder Correia <helder.mc@gmail.com>
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-#
-
+# -*- coding: utf-8 -*-
 """Efficient Clipping of Arbitrary Polygons
 
 Based on the paper "Efficient Clipping of Arbitrary Polygons" by Günther
@@ -35,7 +17,6 @@ class Vertex(object):
 
     This class is almost exactly as described in the paper by Günther/Greiner.
     """
-
     def __init__(self, vertex, alpha=0.0, intersect=False, entry=True, checked=False, degen=False):
         if isinstance(vertex, Vertex):
             vertex = (vertex.x, vertex.y)
@@ -76,7 +57,8 @@ class Vertex(object):
 class Polygon(object):
     """Manages a circular doubly linked list of Vertex objects that represents a polygon."""
 
-    first = None
+    def __init__(self):
+        self.first = None
 
     def add(self, vertex):
         """Add a vertex object to the polygon (vertex is added at the 'end' of the list")."""
@@ -154,350 +136,6 @@ class Polygon(object):
             if v.intersect and not v.checked:
                 yield True
 
-    def clip(self, clip):
-
-        # prep by removing repeat of startpoint at end
-        first = self.first
-        last = first.prev
-        if last.x == first.x and last.y == first.y:
-            first.prev = last.prev
-            last.prev.next = first
-        first = clip.first
-        last = first.prev
-        if last.x == first.x and last.y == first.y:
-            first.prev = last.prev
-            last.prev.next = first
-        
-        # phase one - find intersections
-        anyintersection = False
-        for s in self.iter(): # for each vertex Si of subject polygon do
-            if not s.intersect:
-                for c in clip.iter(): # for each vertex Cj of clip polygon do
-                    if not c.intersect:
-                        try:
-                            i, alphaS, alphaC = intersect_or_on(s, self.next(s.next),
-                                                          c, clip.next(c.next))
-                        except TypeError:
-                            continue
-                            # OLD CATCH ALL...
-##                            if (0 < alphaS < 1) and (0 < alphaC < 1):
-##                                #subj and clip line intersect eachother somewhere in the middle
-##                                iS = Vertex(i, alphaS, intersect=True, entry=False)
-##                                iC = Vertex(i, alphaC, intersect=True, entry=False)
-##                                self.insert(iS, s, self.next(s.next))
-##                                clip.insert(iC, c, clip.next(c.next))
-##                            else:
-##                                #degenerate case, so mark the "degen"-flag, and replace vertex instead of inserting
-##                                iS = Vertex(i, alphaS, intersect=True, entry=False, degen=True)
-##                                iC = Vertex(i, alphaC, intersect=True, entry=False, degen=True)
-##                                print "replace",c
-##                                #self.insert(iS, s, self.next(s.next))
-##                                #clip.insert(iC, c, clip.next(c.next))
-##                                self.replace(s, iS)
-##                                clip.replace(c, iC)
-##                                print "with",iC
-##                                
-##                            iS.neighbour = iC
-##                            iC.neighbour = iS
-
-                        s_between = (0 < alphaS < 1)
-                        c_between = (0 < alphaC < 1)
-                        if s_between and c_between:
-                            #both subj and clip intersect each other somewhere in the middle
-                            iS = Vertex(i, alphaS, intersect=True, entry=False)
-                            iC = Vertex(i, alphaC, intersect=True, entry=False)
-                            self.insert(iS, s, self.next(s.next))
-                            clip.insert(iC, c, clip.next(c.next))
-                        else:
-                            if s_between:
-                                #subj line is touched by the start or stop point of a line from the clip polygon, so insert and mark that intersection as a degenerate
-                                iS = Vertex(i, alphaS, intersect=True, entry=False, degen=True)
-                                self.insert(iS, s, self.next(s.next))
-                            elif alphaS == 0:
-                                #subj line starts at intersection, so mark the "degen"-flag, and replace vertex instead of inserting
-                                iS = Vertex(i, alphaS, intersect=True, entry=False, degen=True)
-                                self.replace(s, iS)
-                            elif alphaS == 1:
-                                #subj line ends at intersection, so mark the "degen"-flag, and replace vertex instead of inserting
-                                iS = Vertex(i, alphaS, intersect=True, entry=False, degen=True)
-                                self.replace(self.next(s.next), iS)
-                            if c_between:
-                                #clip line is touched by the start or stop point of a line from the subj polygon, so insert and mark that intersection as a degenerate
-                                iC = Vertex(i, alphaC, intersect=True, entry=False, degen=True)
-                                clip.insert(iC, c, clip.next(c.next))
-                            elif alphaC == 0:
-                                #clip line starts at intersection, so mark the "degen"-flag, and replace vertex instead of inserting
-                                iC = Vertex(i, alphaC, intersect=True, entry=False, degen=True)
-                                clip.replace(c, iC)
-                            elif alphaC == 1:
-                                #clip line ends at intersection, so mark the "degen"-flag, and replace vertex instead of inserting
-                                iC = Vertex(i, alphaC, intersect=True, entry=False, degen=True)
-                                clip.replace(clip.next(c.next), iC)
-                            
-                        iS.neighbour = iC
-                        iC.neighbour = iS
-                        
-                        anyintersection = True
-
-        if not anyintersection: # special case, no intersections between subject and clip
-            raise ValueError('No Intersections!')
-
-        return self.phase_two(clip)
-
-        # phase two - identify entry/exit points
-##        s_entry ^= self.first.isInside(clip)
-##        for s in self.iter():
-##            if s.intersect:
-##                s.entry = s_entry
-##                s_entry = not s_entry
-##
-##        c_entry ^= clip.first.isInside(self)
-##        for c in clip.iter():
-##            if c.intersect:
-##                c.entry = c_entry
-##                c_entry = not c_entry
-
-##        # phase two - DEGEN SUPPORT ALTERNATIVE
-##        #(prereq, during intersection phase mark .on flag as True if alphas are 0 or 1)
-##        #then mark entry/exit as usual, but if .on flag then check prev and next and neighbour location first
-##        def locationCombi(i, poly):
-##            # degenerate point, ie subject line starts or ends on clipline
-##            # i stands for the intersection point to be labelled
-##            prevloc = testLocation(i.prev, poly)
-##            nextloc = testLocation(i.next, poly)
-##            if i.prev.on:
-##                if i.next.on:
-##                    return "on_on"
-##                elif nextloc == "in":
-##                    return "on_in"
-##                elif nextloc == "out":
-##                    return "on_out"
-##            elif prevloc == "in":
-##                if nextloc:
-##                    return "in_on"
-##                elif nextloc == "in":
-##                    return "in_in"
-##                elif nextloc == "out":
-##                    return "in_out"
-##            elif prevloc == "out":
-##                if i.next.on:
-##                    return "out_on"
-##                elif nextloc == "in":
-##                    return "out_in"
-##                elif nextloc == "out":
-##                    return "out_out"
-##        s_entry ^= self.first.isInside(clip)
-##        for s in self.iter():
-##            if s.intersect:
-##                if s.on:
-##                    # intersection is degenerate, is the start/endpoint of a line
-##                    # so label entry/exit based on prev/next locations
-##                    s_combi = locationCombi(s, clip)
-##                    if s_combi in ("in_in","on_on","out_out"):
-##                        c_combi = locationCombi(s.neighbour, self)
-##                        if c_combi in ("in_in","on_on","out_out"):
-##                            s.intersect = False
-##                        elif s_combi == "out_out":
-##                            s.entry = False
-##                        elif s_combi == "in_in":
-##                            s.entry = True
-##                        elif s_combi == "on_on":
-##                            # label opposite of neighbour
-##                            # ...but it hasnt been labelled yet, endless loop?
-##                            s.entry = not s.neighbour.entry
-##                    # at least one on
-##                    elif s_combi in ("on_out","in_on"):
-##                        s.entry = False
-##                    elif s_combi in ("out_on","on_in"):
-##                        s.entry = True
-##                    # finally check for conflict with neighbour
-##                    # ...but it hasnt been labelled yet, endless loop?
-##                    if s.entry and s.neighbour.entry:
-##                        s.intersect = False
-##                        s.inside = True
-##                    elif not s.entry and not s.neighbour.entry:
-##                        s.intersect = False
-##                        s.inside = False
-##                else:
-##                    #pure inside or outside, so use normal entry toggle
-##                    s.entry = s_entry
-##                    s_entry = not s_entry
-
-
-    def phase_two(self, clip):
-        # phase two - MY OWN IMPROV
-        #RECENT FIXES
-        # "ON" DOESNT NECESARILY MEAN IT'S ALONG ONE EDGE, BC NEXT CAN JUMP ACROSS EDGES INWARDS AND OUTWARDS EVEN THOUGH IT IS ON
-        #  NEED TO TEST FOR THIS, MAYBE WITH LINE-POLY INTERSECTION TEST
-        #  ACTUALLY, TEST IT BY ALSO SEEING HOW THE NEIGHBOUR PREV AND NEXT ARE, WILL TELL IF ITS ENTERING OR EXITING THE OTHER POLYGON
-        #  ACTUALLY, PROB JUST EASIEST WITH USING THE IN/OUT STATUS OF MIDPOINT BW CUR-PREV AND CUR-NEXT
-        # ALSO UNRELATED, REMOVE LAST POINT OF POLYS IF SAME AS FIRST, AND JUST APPEND FIRST TO END BEFORE RETURNING RESULTS
-        #---
-        #FINAL UNRELATED, SHAPES NEXT TO EACH OTHER HAVE PROBLEMS, MAYBE CUS OF WRONG INSIDE TEST AND EARLY RETURN AFTER PHASE1
-        #FINAL FINAL, RELATED? STARTPOINT MUST BE MADE AN OPENING INTERSECTION IF ITS ON AN EDGE AND MIDPOINT TO NEXT IS "IN"
-        #MAYBE ALSO DOESNT DIFFERENTIATE THE RESULT HOLES CORRECTLY, MAYBE DUE TO INSIDE TESTS
-        #AND MAYBE GETS STUCK IN ENDLESS LOOP IF TOO MANY RANDOM POLYGON VERTICES, BUT NEED TO CHECK OUT IF IT'S THE AMOUNT OF VERTICES OR JUST UNSUPPORTED SELFINTERSECTIONS
-        #
-        #  (prereq, during intersection phase mark .degen flag as True if any of the alphas are 0 or 1)
-        #  then mark entry/exit as usual, but if .degen flag then check prev and next location first
-
-        # based on Forster, start by looping both subj and clip and marking each vertex location
-        for s in self.iter():
-            s.loc = testLocation(s, clip)
-        for c in clip.iter():
-            c.loc = testLocation(c, self)
-            
-        # proceed to loop subj, marking as entry or exit, and potentially changing the location flags
-        for s in self.iter():
-            
-            if s.intersect:
-                
-                def mark(current):
-                    neighbour = current.neighbour
-                    #on/on
-                    if current.prev.loc == "on" and current.next.loc == "on":
-                      #Determine what to do based on the neighbour
-                      #en tag is the opposite of the neighbour's en tag 
-                      if neighbour.prev.loc == "on" and neighbour.next.loc == "on":
-                          current.intersect = False
-                          if neighbour.loc == "in": current.loc = "out"
-                          elif neighbour.loc == "out": current.loc = "in"
-                          #neighbour.entry = True
-                      elif neighbour.prev.loc == "on" and neighbour.next.loc == "out":
-                          current.entry = True
-                          current.loc = "in"
-                      elif neighbour.prev.loc == "on" and neighbour.next.loc == "in":
-                          current.entry = False
-                          current.loc = "in"
-                      elif neighbour.prev.loc == "out" and neighbour.next.loc == "on":
-                          current.entry = False
-                          current.loc = "in"
-                      elif neighbour.prev.loc == "out" and neighbour.next.loc == "out":
-                          current.intersect = False
-                          if neighbour.loc == "in": current.loc = "out"
-                          elif neighbour.loc == "out": current.loc = "in"
-                          #neighbour.entry = False
-                      elif neighbour.prev.loc == "out" and neighbour.next.loc == "in":
-                          current.entry = False
-                          current.loc = "in"
-                      elif neighbour.prev.loc == "in" and neighbour.next.loc == "on":
-                          current.entry = True
-                          current.loc = "in"
-                      elif neighbour.prev.loc == "in" and neighbour.next.loc == "out":
-                          current.entry = True
-                          current.loc = "in"
-                      elif neighbour.prev.loc == "in" and neighbour.next.loc == "in":
-                          current.intersect = False
-                          if neighbour.loc == "in": current.loc = "out"
-                          elif neighbour.loc == "out": current.loc = "in"
-                          #neighbour.entry = True
-                    #on/out
-                    elif current.prev.loc == "on" and current.next.loc == "out":
-                        current.entry = False
-                    #on/in  
-                    elif current.prev.loc == "on" and current.next.loc == "in":
-                        current.entry = True
-                    #out/on  
-                    elif current.prev.loc == "out" and current.next.loc == "on":
-                        current.entry = True
-                    #out/out  
-                    elif current.prev.loc == "out" and current.next.loc == "out":
-                        if neighbour.prev.loc == "on" and neighbour.next.loc == "on":
-                            current.intersect = False
-                            current.loc = "out"
-                            #neighbour.entry = True
-                        elif neighbour.prev.loc == neighbour.next.loc == "out" or neighbour.prev.loc == neighbour.next.loc == "in":
-                            current.intersect = False
-                            current.loc = "out"
-                        else:
-                            if neighbour.prev.loc == "on" and neighbour.next.loc == "out":
-                                current.entry = True
-                            else:
-                                current.entry = False
-                    #out/in  
-                    elif current.prev.loc == "out" and current.next.loc == "in":
-                        current.entry = True
-                    #in/on
-                    elif current.prev.loc == "in" and current.next.loc == "on":
-                        current.entry = False
-                    #in/out
-                    elif current.prev.loc == "in" and current.next.loc == "out":
-                        current.entry = False
-                    #in/in
-                    elif current.prev.loc == "in" and current.next.loc == "in":
-                        if neighbour.prev.loc == "on" and neighbour.next.loc == "on":
-                            current.intersect = False
-                            current.loc = "in"
-                            #neighbour.entry = False
-                        elif neighbour.prev.loc == neighbour.next.loc == "out" or neighbour.prev.loc == neighbour.next.loc == "in":
-                            current.intersect = False
-                            current.loc = "in"
-                        else:
-                            if neighbour.prev.loc == "in" and neighbour.next.loc == "out":
-                                current.entry = True
-                            else:
-                                current.entry = False
-
-
-                # mark curr
-                mark(s)
-
-##                # mark neighbour
-##                # NOTE: the algorithm explained in the article only explains
-##                # how to mark the main subject polygon, but never says how
-##                # to mark the neighbour, so just using the same procedure
-##                mark(s.neighbour)
-
-                # finally make sure curr and neighbour dont have same flags
-                if s.intersect and s.neighbour.intersect:
-                    if s.entry and s.neighbour.entry:
-                        s.intersect = False
-                        s.loc = "in"
-                    elif not s.entry and not s.neighbour.entry:
-                        s.intersect = False
-                        s.loc = "out"
-
-        return self.phase_three()
-
-    def phase_three(self):
-        # phase three - construct a list of clipped polygons
-        resultpolys = []
-        for _ in self.unprocessed():
-            current = self.first_intersect
-            clipped = Polygon()
-            clipped.add(Vertex(current))
-            while True:
-                current.setChecked()
-                if current.entry:
-                    while True:
-                        current = current.next
-                        clipped.add(Vertex(current))
-                        if current.intersect:
-                            break
-                else:
-                    while True:
-                        current = current.prev
-                        clipped.add(Vertex(current))
-                        if current.intersect:
-                            break
-
-                current = current.neighbour
-                if current.checked:
-                    break
-
-            polytuple = (clipped, [])
-            resultpolys.append(polytuple)
-
-        #sort into exteriors and holes
-        for pindex,(polyext,polyholes) in enumerate(resultpolys):
-            for otherext,otherholes in resultpolys:
-                if polyext == otherext:
-                    continue # don't compare to self
-                if polyext.first.isInside(otherext):
-                    otherholes.append(polyext) #poly is within other so make into a hole
-                    del resultpolys[pindex] #and delete poly from being an independent poly
-        return resultpolys
-
     def __repr__(self):
         """String representation of the polygon for debugging purposes."""
         count, out = 1, "\n"
@@ -516,32 +154,171 @@ class Polygon(object):
                 return
 
 
-def intersect(s1, s2, c1, c2):
-    """Test the intersection between two lines (two pairs of coordinates for two points).
+class Clipper(object):
+    def __init__(self, subject, clip):
+        self.subject = subject
+        self.clip = clip
 
-    Return the coordinates for the intersection and the subject and clipper alphas if the test passes.
+        # prep by removing repeat of startpoint at end
+        first = subject.first
+        last = first.prev
+        if last.x == first.x and last.y == first.y:
+            first.prev = last.prev
+            last.prev.next = first
+        first = clip.first
+        last = first.prev
+        if last.x == first.x and last.y == first.y:
+            first.prev = last.prev
+            last.prev.next = first
+    
+    def do_it(self):
+        polygons = self.phase_one(self.clip)
+        if polygons is None:
+            self.phase_two()
+            polygons = self.phase_three()
+        
+        return self.hole_handler(polygons)
+        
+    def hole_handler(self, polygons):
+        print 'Input:', polygons
+        resultpolys = [(poly, []) for poly in polygons]
+        #sort into exteriors and holes
+        for pindex, (polyext, polyholes) in enumerate(resultpolys):
+            for otherext, otherholes in resultpolys:
+                if polyext == otherext:
+                    continue # don't compare to self
+                if polyext.first.isInside(otherext):
+                    otherholes.append(polyext) #poly is within other so make into a hole
+                    del resultpolys[pindex] #and delete poly from being an independent poly
+        return resultpolys
+        
+    def phase_one(self, clip):
+        # phase one - find intersections
+        n_intersections = 0
+        for s in self.subject.iter():
+            for c in self.clip.iter():
+                try:
+                    i, alphaS, alphaC = intersect_or_on(s, s.next,
+                                                        c, c.next)
+                except TypeError:
+                    continue
 
-    Algorithm based on: http://paulbourke.net/geometry/lineline2d/
-    """
-    den = float( (c2.y - c1.y) * (s2.x - s1.x) - (c2.x - c1.x) * (s2.y - s1.y) )
+                s_between = (0 < alphaS < 1)
+                c_between = (0 < alphaC < 1)
+                if s_between and c_between:
+                    #both subj and clip intersect each other somewhere in the middle
+                    iS = Vertex(i, alphaS, intersect=True, entry=None)
+                    iC = Vertex(i, alphaC, intersect=True, entry=None)
+                    self.subject.insert(iS, s, self.subject.next(s.next))
+                    self.clip.insert(iC, c, clip.next(c.next))
 
-    if not den:
-        return None
+                    iS.neighbour = iC
+                    iC.neighbour = iS
 
-    us = ((c2.x - c1.x) * (s1.y - c1.y) - (c2.y - c1.y) * (s1.x - c1.x)) / den
-    uc = ((s2.x - s1.x) * (s1.y - c1.y) - (s2.y - s1.y) * (s1.x - c1.x)) / den
+                    n_intersections += 1
 
-    if (us == 0 or us == 1) and (0 <= uc <= 1) or\
-       (uc == 0 or uc == 1) and (0 <= us <= 1):
-        print "whoops! degenerate case!"
-        return None
+        print 'Found {} intersections'.format(n_intersections)
+        if not n_intersections: # special case, no intersections between subject and clip
+            return list(self.subject.iter())
 
-    elif (0 < us < 1) and (0 < uc < 1):
-        x = s1.x + us * (s2.x - s1.x)
-        y = s1.y + us * (s2.y - s1.y)
-        return (x, y), us, uc
+    def phase_two(self):
+        polys = self.subject, self.clip
+        
+        for poly, other_poly in [polys, polys[::-1]]:
+            status = poly.first.isInside(other_poly)
+            for vertex in poly.iter():
+                if vertex.intersect:
+                    status = not status
+                    vertex.entry = status
+                    print vertex.entry, vertex.neighbour.entry
 
-    return None
+    def phase_three(self):
+        result = []
+        for _ in self.subject.unprocessed():
+            current = self.subject.first_intersect
+            clipped = Polygon()
+            result.append(clipped)
+            clipped.add(Vertex(current))
+            while True:
+                current.setChecked()
+                if current.entry:
+                    while True:
+                        current = current.next
+                        clipped.add(Vertex(current))
+                        if current.intersect:
+                            break
+                else:
+                    while True:
+                        current = current.prev
+                        clipped.add(Vertex(current))
+                        if current.intersect:
+                            break
+                current = current.neighbour
+
+                if current.checked:
+                    break
+        return result
+
+
+
+class Cutter(Clipper):
+    def phase_three(self):
+        result = []
+        start = self.subject.first
+        while True:
+            current = start
+            while current.checked:
+                current = current.next
+                if current is start:
+                    return result
+            isSubject = True
+            clipped = Polygon()
+            result.append(clipped)
+            clipped.add(Vertex(current))
+            current_checked = False
+            while not current_checked:
+                current.setChecked()
+                if current.entry and isSubject:
+                    while True:
+                        current = current.next
+                        clipped.add(Vertex(current))
+                        if current.intersect:
+                            break
+                elif current.entry and not isSubject:
+                    print 'Interpolate forwards!!!!'
+                    clipped.add(Vertex(current))
+                    import cut_d3
+                    r = cut_d3.clip_anti_meridian_interpolate((current.x, current.y),
+                                                              (current.next.x, current.next.y),
+                                                              1)
+                    for geom in r:
+                        for v in geom:
+                            clipped.add(v)
+                    current = current.next
+                elif not current.entry and isSubject:
+                    while True:
+                        current = current.prev
+                        clipped.add(Vertex(current))
+                        if current.intersect:
+                            break
+                elif not current.entry and not isSubject:
+                    print 'Interpolate backwards!!!'
+                    import cut_d3
+                    r = cut_d3.clip_anti_meridian_interpolate((current.x, current.y),
+                                                         (current.previous.x, current.previous.y),
+                                                         -1)
+                    for geom in r:
+                        for v in geom:
+                            clipped.add(v)
+#                     clipped.add(Vertex(current))
+                    current = current.prev
+                    
+                current = current.neighbour
+                isSubject = not isSubject
+                current_checked = current.checked
+            print 'Outer while. ', len(result)
+        return result
+        
 
 def intersect_or_on(s1, s2, c1, c2):
     """Same as intersect(), except returns
@@ -615,29 +392,33 @@ def testLocation(point, polygon):
         return "out"
 
 
-def clip_polygon(subject, clipper, operation = 'difference'):
+
+def clip_polygon(subject_vertices, clip_vertices, klass=Clipper):
     """
     Higher level function for clipping two polygons (from a list of points).
     Since input polygons are lists of points, output is also in list format.
     Each polygon in the resultlist is a tuple of: (polygon exterior, list of polygon holes)
     """
-    Subject = Polygon()
-    Clipper = Polygon()
+    subject = Polygon()
+    clip = Polygon()
 
-    for s in subject:
-        Subject.add(Vertex(s))
+    for s in subject_vertices:
+        subject.add(Vertex(s))
 
-    for c in clipper:
-        Clipper.add(Vertex(c))
-
-    clipped = Subject.clip(Clipper)
-
+    for c in clip_vertices:
+        clip.add(Vertex(c))
+ 
+    clipper = klass(subject, clip)
+ 
+    clipped = clipper.do_it()
+ 
     clipped = [(ext.points,[hole.points for hole in holes]) for ext,holes in clipped]
     return clipped
 
 
 
-if __name__ == "__main__":
+
+def test():
  
     subjpoly = [(0,0),(6,0),(6,6),(0,6),(0,0)]
 
@@ -649,24 +430,25 @@ if __name__ == "__main__":
     #clippoly = [(-1,-1),(-1,7),(7,7),(7,-1),(-1,-1)] #larger, covering all
     #clippoly = [(-10,-10),(-10,-70),(-70,-70),(-70,-10),(-10,-10)] #larger, outside
     # degenerate intersections
-    #clippoly = [(0,5),(6,4),(10,4),(10,10),(4,10),(0,5)] #degenerate, starts on edge intersection and goes inside
+#     clippoly = [(0,5),(6,4),(10,4),(10,10),(4,10),(0,5)] #degenerate, starts on edge intersection and goes inside
     #clippoly = [(5,6),(5.2,5.5),(5,5.4),(4.8,5.5)] #degenerate, starts on edge intersection and goes outside
     #clippoly = [(1,5),(6,4),(6,5),(10,4),(10,10),(4,10),(2,6),(1,6),(1,5)] #degenerate, hesitating to enter and exit
     #clippoly = [(1,5),(6,4),(6,5),(10,4),(10,10),(4,10),(2,6),(1.3,6),(1.6,6),(1,6),(1,5)] #degenerate, also multiple degens along shared line
 #     clippoly = [(1,5),(6,4),(6,5),(10,4),(10,10),(4,10),(2,6),(1.5,5.7),(1,6),(0,6),(1,5)] #degenerate, back and forth on-out along shared line
     #clippoly = [(0,0),(6,0),(6,6),(0,6),(0,0)] #degenerate, perfect overlap
-    #clippoly = [(1,0),(6,0),(6,6),(1,6),(1,0)] #degenerate, partial inside overlap
+#     clippoly = [(1,0),(6,0),(6,6),(1,6),(1,0)] #degenerate, partial inside overlap
     #clippoly = [(0,6),(6,6),(6,10),(0,10),(0,6)] #degenerate, right next to eachother
     #clippoly = [(2,6),(6,6),(6,10),(2,10),(2,6)] #degenerate, partial right next to eachother
     # self intersecting polygons
-#     clippoly = [(1,4),(3,8),(1,5),(5,4),(5,10),(1,10),(1,4)]
+#     clippoly = [(1,4),(3,8),(1,5),(5,4),(5,10),(1,10),(-1,4)]
     # random polygon
     #clippoly = [(random.randrange(0,10),random.randrange(0,10)) for _ in xrange(10)] #random
     #run operation
     import time
     t = time.time()
 
-    resultpolys = clip_polygon(subjpoly,clippoly,"difference")
+    resultpolys = []
+    resultpolys = clip_polygon(subjpoly,clippoly)
 
     print "finished:",resultpolys,time.time()-t
    
@@ -688,12 +470,51 @@ if __name__ == "__main__":
         paths = []
         
         paths.append(mpath.Path(ext, closed=True))
-#         for hole in holes:
-#             paths.append(mpath.Path(hole))
+        for hole in holes:
+            print 'Hole:', hole
+            paths.append(mpath.Path(hole))
         print 'Ext:', ext
-        ax2.add_patch(PathPatch(paths[0],
+        ax2.add_patch(PathPatch(mpath.Path.make_compound_path(*paths),
                                 alpha=0.5, color='green'))
     
     ax2.margins(0.1)
     ax2.autoscale_view()
     plt.show()
+
+if __name__ == "__main__":
+#     test()
+
+    subjpoly = [(0,0), (-190,0), (-190,80), (0,80), (0,0)]
+    clippoly = [(-180, -90), (-180, 90)]
+
+    resultpolys = clip_polygon(subjpoly, clippoly,
+                                klass=Cutter
+                               )
+
+    import matplotlib.pyplot as plt
+    
+    import matplotlib.path as mpath
+    from matplotlib.patches import PathPatch
+    
+    ax = plt.subplot(1, 2, 1)
+    ax.add_patch(PathPatch(mpath.Path(subjpoly), alpha=0.5, color='red'))
+    ax.add_patch(PathPatch(mpath.Path(clippoly), alpha=0.5, color='green'))
+    ax.margins(0.1)
+    ax.autoscale_view()
+    
+    ax2 = plt.subplot(1, 2, 2)
+    print len(resultpolys)
+    for ext, holes in resultpolys:
+        paths = []
+        
+        paths.append(mpath.Path(ext, closed=True))
+        for hole in holes:
+            paths.append(mpath.Path(hole))
+        print ext
+        ax2.add_patch(PathPatch(mpath.Path.make_compound_path(*paths),
+                                alpha=0.5, color='green'))
+    
+    ax2.margins(0.1)
+    ax2.autoscale_view()
+#     plt.show()
+
