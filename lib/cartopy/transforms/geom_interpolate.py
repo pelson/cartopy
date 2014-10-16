@@ -4,10 +4,6 @@ import numpy as np
 
 
 
-
-
-
-
 def to_cartesian(spherical_p):
     # Convert lats and lons to cartesian xyz. Only use this function for fast approximation. For anything else, just use the Geocentric coordinate system.
     lam, phi = np.deg2rad(spherical_p)
@@ -135,10 +131,10 @@ if __name__ == '__main__':
     do_africa = True
 
     proj = ccrs.Robinson()
-    precision = 2e6
-
-    proj = ccrs.Mollweide()
     precision = 4e6
+
+#    proj = ccrs.Mollweide()
+#    precision = 4e6
 
     path = mpath.Path([[-50, 50], [30, 50], [50, -60], [-50, 50],
                        [-20, 30], [30, -20], [20, 40], [-20, 30]],
@@ -154,9 +150,9 @@ if __name__ == '__main__':
                        [0, -90], [-180, -90], [-180, 0], [-180, 90]])
 
     # NPS
-    path = mpath.Path([[180, -90], [-90, -90], [0, -90], [90, -90], [180, -90]])
-    proj = ccrs.NorthPolarStereo()
-    precision = 5e21
+#    path = mpath.Path([[180, -90], [-90, -90], [0, -90], [90, -90], [180, -90]])
+#    proj = ccrs.NorthPolarStereo()
+#    precision = 5e21
 
     # XXX DOESN'T WORK
 #    proj = ccrs.LambertConformal(central_longitude=0, central_latitude=80, secant_latitudes=(-14, 13))

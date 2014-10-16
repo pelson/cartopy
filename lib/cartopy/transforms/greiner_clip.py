@@ -33,7 +33,7 @@ class Vertex(object):
         self.checked = checked      # True if the vertex has been checked (last phase)
 
     def isInside(self, poly):
-        if testLocation(self, poly) in ("in","on"):
+        if testLocation(self, poly) in ("in", "on"):
             return True
         else: return False
 
@@ -170,17 +170,17 @@ class Clipper(object):
         if last.x == first.x and last.y == first.y:
             first.prev = last.prev
             last.prev.next = first
-    
+
     def do_it(self):
         polygons = self.phase_one(self.clip)
         if polygons is None:
             self.phase_two()
             polygons = self.phase_three()
-        
+
         return self.hole_handler(polygons)
-        
+
     def hole_handler(self, polygons):
-        print 'Input:', polygons
+#        print 'Input:', polygons
         resultpolys = [(poly, []) for poly in polygons]
         #sort into exteriors and holes
         for pindex, (polyext, polyholes) in enumerate(resultpolys):
@@ -191,7 +191,7 @@ class Clipper(object):
                     otherholes.append(polyext) #poly is within other so make into a hole
                     del resultpolys[pindex] #and delete poly from being an independent poly
         return resultpolys
-        
+
     def phase_one(self, clip):
         # phase one - find intersections
         n_intersections = 0
@@ -223,7 +223,7 @@ class Clipper(object):
 
     def phase_two(self):
         polys = self.subject, self.clip
-        
+
         for poly, other_poly in [polys, polys[::-1]]:
             status = poly.first.isInside(other_poly)
             for vertex in poly.iter():
@@ -260,8 +260,41 @@ class Clipper(object):
         return result
 
 
+def clip_anti_meridian_interpolate(p0=None, p1=None, direction=1):
+    import numpy as np
+    pi = 180
+    if p0 is None:
+        phi = direction * 90
+        r = [[-pi, phi],
+             [0, phi],
+             [pi, phi],
+             [pi, 0],
+             [pi, -phi],
+             [0, -phi],
+             [-pi, -phi],
+             [-pi, 0],
+             [-pi, phi],
+             ]
+    elif not np.allclose(p0[0], p1[0]):
+        s = pi if p0[0] < p1[0] else -pi;
+        phi = direction * s / 2.;
+        r = [[-s, phi],
+             [0, phi],
+             [s, phi]]
+    else:
+        r = [p1]
+    return r
+
 
 class Cutter(Clipper):
+    def phase_two(self):
+        status = self.subject.first.isInside(self.clip)
+        for vertex in self.subject.iter():
+            if vertex.intersect:
+                status = not status
+                vertex.entry = status
+                print vertex.entry, vertex.neighbour.entry
+
     def phase_three(self):
         result = []
         start = self.subject.first
@@ -287,13 +320,11 @@ class Cutter(Clipper):
                 elif current.entry and not isSubject:
                     print 'Interpolate forwards!!!!'
                     clipped.add(Vertex(current))
-                    import cut_d3
-                    r = cut_d3.clip_anti_meridian_interpolate((current.x, current.y),
+                    clip_anti_meridian_interpolate((current.x, current.y),
                                                               (current.next.x, current.next.y),
                                                               1)
-                    for geom in r:
-                        for v in geom:
-                            clipped.add(v)
+                    for v in r:
+                        clipped.add(Vertex(v))
                     current = current.next
                 elif not current.entry and isSubject:
                     while True:
@@ -303,28 +334,27 @@ class Cutter(Clipper):
                             break
                 elif not current.entry and not isSubject:
                     print 'Interpolate backwards!!!'
-                    import cut_d3
-                    r = cut_d3.clip_anti_meridian_interpolate((current.x, current.y),
+                    clip_anti_meridian_interpolate((current.x, current.y),
                                                          (current.previous.x, current.previous.y),
-                                                         -1)
-                    for geom in r:
-                        for v in geom:
-                            clipped.add(v)
+                                                         - 1)
+#                    for geom in r:
+                    for v in r:
+                        clipped.add(Vertex(v))
 #                     clipped.add(Vertex(current))
                     current = current.prev
-                    
+
                 current = current.neighbour
                 isSubject = not isSubject
                 current_checked = current.checked
             print 'Outer while. ', len(result)
         return result
-        
+
 
 def intersect_or_on(s1, s2, c1, c2):
     """Same as intersect(), except returns
     intersection even if degenerate.
     """
-    den = float( (c2.y - c1.y) * (s2.x - s1.x) - (c2.x - c1.x) * (s2.y - s1.y) )
+    den = float((c2.y - c1.y) * (s2.x - s1.x) - (c2.x - c1.x) * (s2.y - s1.y))
     if not den:
         return None
 
@@ -349,7 +379,7 @@ def testLocation(point, polygon):
     # begin
     if polygon.first.y == point.y and polygon.first.x == point.x:
         return "on" # vertex
-    w =0
+    w = 0
     for v in polygon.iter():
         if v.next.y == point.y:
             if v.next.x == point.x:
@@ -407,24 +437,24 @@ def clip_polygon(subject_vertices, clip_vertices, klass=Clipper):
 
     for c in clip_vertices:
         clip.add(Vertex(c))
- 
+
     clipper = klass(subject, clip)
- 
+
     clipped = clipper.do_it()
- 
-    clipped = [(ext.points,[hole.points for hole in holes]) for ext,holes in clipped]
+
+    clipped = [(ext.points, [hole.points for hole in holes]) for ext, holes in clipped]
     return clipped
 
 
 
 
 def test():
- 
-    subjpoly = [(0,0),(6,0),(6,6),(0,6),(0,0)]
+
+    subjpoly = [(0, 0), (6, 0), (6, 6), (0, 6), (0, 0)]
 
     # normal intersections
 #     clippoly = [(4,4),(10,4),(10,10),(4,10),(4,4)] #simple overlap
-    clippoly = [(1,4),(3,8),(5,4),(5,10),(1,10),(1,4)] #jigzaw overlap
+    clippoly = [(1, 4), (3, 8), (5, 4), (5, 10), (1, 10), (1, 4)] #jigzaw overlap
 #     clippoly = [(7,7),(7,9),(9,9),(9,7),(7,7)] #smaller, outside
     #clippoly = [(2,2),(2,4),(4,4),(4,2),(2,2)] #smaller, inside
     #clippoly = [(-1,-1),(-1,7),(7,7),(7,-1),(-1,-1)] #larger, covering all
@@ -448,27 +478,27 @@ def test():
     t = time.time()
 
     resultpolys = []
-    resultpolys = clip_polygon(subjpoly,clippoly)
+    resultpolys = clip_polygon(subjpoly, clippoly)
 
-    print "finished:",resultpolys,time.time()-t
-   
+    print "finished:", resultpolys, time.time() - t
+
     print subjpoly
     import matplotlib.pyplot as plt
-    
+
     import matplotlib.path as mpath
     from matplotlib.patches import PathPatch
-    
+
     ax = plt.subplot(1, 2, 1)
-    ax.add_patch(PathPatch(mpath.Path(subjpoly), alpha=0.5, color='red'))
-    ax.add_patch(PathPatch(mpath.Path(clippoly), alpha=0.5, color='green'))
+    ax.add_patch(PathPatch(mpath.Path(subjpoly), alpha=0.5, color='green'))
+    ax.add_patch(PathPatch(mpath.Path(clippoly), alpha=0.5, color='red'))
     ax.margins(0.1)
     ax.autoscale_view()
-    
+
     ax2 = plt.subplot(1, 2, 2)
 #     paths = []
     for ext, holes in resultpolys:
         paths = []
-        
+
         paths.append(mpath.Path(ext, closed=True))
         for hole in holes:
             print 'Hole:', hole
@@ -476,7 +506,7 @@ def test():
         print 'Ext:', ext
         ax2.add_patch(PathPatch(mpath.Path.make_compound_path(*paths),
                                 alpha=0.5, color='green'))
-    
+
     ax2.margins(0.1)
     ax2.autoscale_view()
     plt.show()
@@ -484,37 +514,36 @@ def test():
 if __name__ == "__main__":
 #     test()
 
-    subjpoly = [(0,0), (-190,0), (-190,80), (0,80), (0,0)]
-    clippoly = [(-180, -90), (-180, 90)]
+    subjpoly = [(0, 0), (-190, 0), (-190, 80), (0, 80), (0, 0)]
+    clippoly = [(-180, -90), (-180, 90), (-179, 90), (-179, -90)]
 
     resultpolys = clip_polygon(subjpoly, clippoly,
-                                klass=Cutter
+#                                klass=Cutter
                                )
 
     import matplotlib.pyplot as plt
-    
+
     import matplotlib.path as mpath
     from matplotlib.patches import PathPatch
-    
+
     ax = plt.subplot(1, 2, 1)
-    ax.add_patch(PathPatch(mpath.Path(subjpoly), alpha=0.5, color='red'))
-    ax.add_patch(PathPatch(mpath.Path(clippoly), alpha=0.5, color='green'))
+    ax.add_patch(PathPatch(mpath.Path(subjpoly), alpha=0.5, color='green'))
+    ax.add_patch(PathPatch(mpath.Path(clippoly), alpha=0.5, color='red'))
     ax.margins(0.1)
     ax.autoscale_view()
-    
-    ax2 = plt.subplot(1, 2, 2)
+
+    ax2 = plt.subplot(1, 2, 2, sharex=ax, sharey=ax)
     print len(resultpolys)
     for ext, holes in resultpolys:
         paths = []
-        
         paths.append(mpath.Path(ext, closed=True))
         for hole in holes:
-            paths.append(mpath.Path(hole))
-        print ext
-        ax2.add_patch(PathPatch(mpath.Path.make_compound_path(*paths),
+            paths.append(mpath.Path(hole[::-1]))
+        path = mpath.Path.make_compound_path(*paths)
+        print 'Path:', path
+        ax2.add_patch(PathPatch(path,
                                 alpha=0.5, color='green'))
-    
-    ax2.margins(0.1)
-    ax2.autoscale_view()
-#     plt.show()
+
+
+#    plt.show()
 
