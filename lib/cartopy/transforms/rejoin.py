@@ -1,5 +1,3 @@
-import greiner_clip
-
 
 class IntersectionPoint(object):
     def __init__(self, xy, prev_intersection=None, next_intersection=None,

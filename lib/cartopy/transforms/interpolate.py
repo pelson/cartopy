@@ -24,7 +24,6 @@ def great_circle_interpolation(p0, p1):
     k = 1. / np.sin(d)
 
     def interpolator(t):
-        # XXX B was (t *= d) - what is that?
         B = np.sin(t * d) * k
         A = np.sin(d - (t * d)) * k
         x = A * kx0 + B * kx1
@@ -38,7 +37,8 @@ def great_circle_interpolation(p0, p1):
 
 
 if __name__ == '__main__':
-    interpolator = great_circle_interpolation([-40, 40], [100, 60])
+#    interpolator = great_circle_interpolation([-40, 40], [100 + 360, 60])
+    interpolator = great_circle_interpolation([-40, 40], [100 + 360, 60])
 
     import matplotlib.pyplot as plt
 

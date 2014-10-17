@@ -128,6 +128,25 @@ def interpolate_and_project_path(path, project_fn, interpolator_creation_fn, pre
 
 
 
+# =================  THE INTERFACE? ==========================
+import collections
+PolygonType = collections.namedtuple('PolygonType', 'ring, holes')
+
+
+class TargetGeometry(object):
+    def __init__(self, geometry, crs, vertex_interp_fn):
+        # XXX crs - could just be a function which takes xy -> target xy.
+        self.geometry = geometry
+        self.crs = crs
+        self.vertex_interp_fn = vertex_interp_fn
+
+    # XXX REMOVE
+    def show(self, precision):
+        result = self.geometry.interpolate(self.vertex_interp_fn, precision)
+        # do it.
+# ============================================================
+
+
 if __name__ == '__main__':
     
     import cartopy.crs as ccrs

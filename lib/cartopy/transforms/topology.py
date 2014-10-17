@@ -194,11 +194,77 @@ def simple_cases():
                                  [CutLine([[-180, -90], [-180, 90]])])
 
 
+import numpy as np
 
-#def cut():
 
+def crosses_antipodal_line(p0, p1, xy_to_spherical):
+    x0, x1 = p0[0], p1[0]
+
+    x0_gt_x1 = x0 > x1
+
+    if x0 == x1:
+        return False
+    else:
+        orig_direction = (x1 - x0) / 2
+
+    sp0 = xy_to_spherical(*p0)
+    sp1 = xy_to_spherical(*p1)
+
+    sx0, sx1 = sp0[0], sp1[0]
+
+    sx0_gt_sx1 = sx0 > sx1
+
+    if sx0 == sx1:
+        raise ValueError('Full circle?')
+    else:
+        new_direction = (sx1 - sx0) / 2
+
+    if sx0_gt_sx1 != x0_gt_x1:
+        return new_direction != orig_direction
+    else:
+        return new_direction == orig_direction
 
 
 if __name__ == '__main__':
-    pass
-    
+#    simple_cases()
+
+    import cartopy.crs as ccrs
+    from functools import partial
+
+    pc_to_spherical = partial(ccrs.Geodetic().transform_point, src_crs=ccrs.PlateCarree())
+    # XXX TODO: test perfect sphere transform.
+
+    p0 = (170, 0)
+    p1_crosses = (190, 0)
+    p1_same_side = (-170, 0)
+    p0_plus_360 = (170 + 360, 0)
+
+    assert crosses_antipodal_line(p0, p1_crosses, pc_to_spherical) == True
+    assert crosses_antipodal_line(p1_crosses, p0, pc_to_spherical) == True
+
+    assert crosses_antipodal_line(p0, p1_same_side, pc_to_spherical) == False
+    assert crosses_antipodal_line(p1_same_side, p0, pc_to_spherical) == False
+
+    assert crosses_antipodal_line(p0, p0_plus_360, pc_to_spherical) == True
+    assert crosses_antipodal_line(p0_plus_360, p0, pc_to_spherical) == True
+
+    assert crosses_antipodal_line(p0, p0, pc_to_spherical) == False
+
+    pc_to_spherical = partial(ccrs.Geodetic().transform_point, src_crs=ccrs.PlateCarree(central_longitude=180))
+
+    p0 = (-10, 0)
+    p1_crosses = (10, 0)
+    p1_same_side = (-350, 0)
+    p0_plus_360 = (-10 + 360, 0)
+
+    assert crosses_antipodal_line(p0, p1_crosses, pc_to_spherical) == True
+    assert crosses_antipodal_line(p1_crosses, p0, pc_to_spherical) == True
+
+    assert crosses_antipodal_line(p0, p1_same_side, pc_to_spherical) == False
+    assert crosses_antipodal_line(p1_same_side, p0, pc_to_spherical) == False
+
+    assert crosses_antipodal_line(p0, p0_plus_360, pc_to_spherical) == True
+    assert crosses_antipodal_line(p0_plus_360, p0, pc_to_spherical) == True
+
+    assert crosses_antipodal_line(p0, p0, pc_to_spherical) == False
+
