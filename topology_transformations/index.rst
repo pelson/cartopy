@@ -1,6 +1,11 @@
 Topology transformations for R3=>R2 projections
 ===============================================
 
+.. toctree::
+   
+    cartopy_geometry_pipeline
+
+
 Band in PC => Two bands in PC180
 ================================
 
