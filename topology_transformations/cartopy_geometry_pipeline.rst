@@ -76,6 +76,9 @@ We traverse the coordinates and cut those segments which cross the antimeridian.
 
 The coordinate **values** of the original geometry are still preserved, except for the inserted great circles, but the topology is now that of the target projection.
 
+.. plot::
+    code/spherical_antarctica_to_pc180.py
+
 Phase Three: Interpolate to arbitrary precision
 ################################################
 
@@ -87,6 +90,9 @@ The interpolation doesn't need to worry about whether a segment crosses the date
 
 Armed with these two functions, we traverse the geometry, interpolating each segment until it reaches a threshold of "acceptablity", and eventually end up with a geometry which can be used for various purposes, including drawing on a map.
 
+
+.. plot::
+    code/interpolate.py
 
  
 

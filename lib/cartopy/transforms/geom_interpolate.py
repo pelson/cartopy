@@ -152,7 +152,6 @@ if __name__ == '__main__':
     import cartopy.crs as ccrs
     from functools import partial
 
-    do_africa = True
 
     proj = ccrs.Robinson()
     precision = 4e6
@@ -165,66 +164,10 @@ if __name__ == '__main__':
                       codes=[1, 2, 2, 2,
                              1, 2, 2, 2])
 
-    path = mpath.Path([[-50, 50], [50, 50], [50, -50], [-50, 50],
-                       [-30, 30], [30, -30], [30, 30], [-30, 30]],
-                      codes=[1, 2, 2, 2,
-                             1, 2, 2, 2])
-
-    path = mpath.Path([[-180, 90], [0, 90], [180, 90], [180, 0], [180, -90],
-                       [0, -90], [-180, -90], [-180, 0], [-180, 90]])
-
-
-    # NPS
-#    path = mpath.Path([[180, -90], [-90, -90], [0, -90], [90, -90], [180, -90]])
-#    proj = ccrs.NorthPolarStereo()
-#    precision = 5e21
-
-    # XXX DOESN'T WORK
-#    proj = ccrs.LambertConformal(central_longitude=0, central_latitude=80, secant_latitudes=(-14, 13))
-#    precision = 4e4
-#    w = 100
-#    path = mpath.Path([[-w, 90], [0, 90], [w, 90]] + [[w, i] for i in np.linspace(90, -40, 3)] + 
-#                      [[i, -40] for i in np.linspace(w, -w, 3)] +
-#                      [[-w, i] for i in np.linspace(-40, 90, 3)] + [[-w, 90]])
-
-#    proj = ccrs.Orthographic()
-#    precision = 8e5
-#    path = mpath.Path([[-90, 90], [0, 90], [90, 90], [90, 0], [90, -90],
-#                       [0, -90], [-90, -90], [-90, 0], [-90, 90]])
-
-#    # XXX Doesn't work.
-#    proj = ccrs.TransverseMercator()
-#    precision = 8e6
-#    path = mpath.Path([[-179, 90], [0, 90], [180, 90], [180, 0.0001], [180, 0], [180, -90],
-#                       [0, -90], [-180, -90], [-180, 0], [-180, 0.0001], [-180, 90]])
-
-
-#    # XXX Doesn't work.
-#    proj = ccrs.Gnomonic()
-#    precision = 8e6
-#    path = mpath.Path([[-180, -90], [-90, -90], [0, -90], [90, -90], [180, -90], [-180, -90]])
-
-
-#    # Equ conic
-#    from pyproj import Proj
-#    proj = Proj(proj='eqc')
-#    proj.transform_point = proj.__call__
-#    proj.x_limits = 'Unknown'
-#    precision = 4e6
-#    print proj.transform_point(path.vertices[:, 0], path.vertices[:, 1])
-
-#    # IGH
-#    eps = 1e-13
-#    path = mpath.Path([[-180, 90],
-#                       [-40 - eps, 90], [-40 - eps, 0], [-40 + eps, 0], [-40 + eps, 90],
-#                       [0, 90], [180, 90], [180, 0], [180, -90],
-#                       [80+eps, -90], [80+eps, 0], [80-eps, 0], [80-eps, -90],
-#                       [0, -90],
-#                       [-20+eps, -90], [-20+eps, 0], [-20-eps, 0], [-20-eps, -90],
-#                       [-100+eps, -90], [-100+eps, 0], [-100-eps, 0], [-100-eps, -90],
-#                       [-180, -90], [-180, 0], [-180, 90]])
-#    proj = ccrs.InterruptedGoodeHomolosine()
-#    precision = 5e4
+#     path = mpath.Path([[-50, 50], [50, 50], [50, -50], [-50, 50],
+#                        [-30, 30], [30, -30], [30, 30], [-30, 30]],
+#                       codes=[1, 2, 2, 2,
+#                              1, 2, 2, 2])
 
 
 
@@ -236,41 +179,17 @@ if __name__ == '__main__':
 
     new_path = interpolate_and_project_path(path, project_fn, interpolate.great_circle_interpolation, precision=Precision(precision, 30))
 
-    if do_africa:
-        # Africa
-        import cartopy.io.shapereader as shpreader
-        shpfilename = shpreader.natural_earth(resolution='110m',
-                                          category='cultural',
-                                          name='admin_0_countries')
-        reader = shpreader.Reader(shpfilename)
-        countries = reader.records()
-        shapes = []
-        for country in countries:
-            if country.attributes['continent'] == 'Africa':
-                shapes.append(country.geometry)
-        import cartopy.mpl.patch as cpatch
-        from shapely.ops import cascaded_union
-        africa = cpatch.geos_to_path(cascaded_union(shapes))
-        africa = mpath.Path.make_compound_path(*africa)
-
-        africa_interp = interpolate_and_project_path(africa, project_fn, interpolate.great_circle_interpolation, precision=Precision(precision, 30))
-
-
     import matplotlib.pyplot as plt
     from matplotlib.patches import PathPatch
 
     plt.figure(figsize=(18, 8))
     ax = plt.subplot(1, 2, 1)
     ax.add_patch(PathPatch(path, facecolor='yellow', edgecolor='red'))
-    if do_africa:
-        ax.add_patch(PathPatch(africa, facecolor='green', edgecolor='black'))
     ax.autoscale_view()
 
     print path.vertices.shape, new_path.vertices.shape
 
     ax = plt.subplot(1, 2, 2)
     ax.add_patch(PathPatch(new_path, facecolor='yellow', edgecolor='red'))
-    if do_africa:
-        ax.add_patch(PathPatch(africa_interp, facecolor='green', edgecolor='black', zorder=2))
     ax.autoscale_view()
     plt.show()

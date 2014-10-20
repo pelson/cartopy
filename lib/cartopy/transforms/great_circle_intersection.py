@@ -1,80 +1,79 @@
-import numpy as np
-
+# -*- coding: utf-8 -*-
 
 # SEE http://www.jasondavies.com/maps/intersect/
-
+# 
 # For solutions, http://geo.javawa.nl/coordcalc/index_en.html
+# http://www.dirkbertels.net/computing/greatCircles_files/great_circles_070206.pdf
 
-def intersect(a, b):
-    var a0 = d3_geo_cartesian([a[0][0] * radians, a[0][1] * radians]),
-    a1 = d3_geo_cartesian([a[1][0] * radians, a[1][1] * radians]),
-    b0 = d3_geo_cartesian([b[0][0] * radians, b[0][1] * radians]),
-    b1 = d3_geo_cartesian([b[1][0] * radians, b[1][1] * radians]);
 
-c = """
-function intersect(a, b) {
-  var a0 = d3_geo_cartesian([a[0][0] * radians, a[0][1] * radians]),
-      a1 = d3_geo_cartesian([a[1][0] * radians, a[1][1] * radians]),
-      b0 = d3_geo_cartesian([b[0][0] * radians, b[0][1] * radians]),
-      b1 = d3_geo_cartesian([b[1][0] * radians, b[1][1] * radians]);
-  a = d3_geo_cartesianCross(a0, a1);
-  b = d3_geo_cartesianCross(b0, b1);
-  a0 = d3_geo_cartesianCross(a, a0);
-  a1 = d3_geo_cartesianCross(a, a1);
-  b0 = d3_geo_cartesianCross(b, b0);
-  b1 = d3_geo_cartesianCross(b, b1);
-  var axb = d3_geo_cartesianCross(a, b);
-  d3_geo_cartesianNormalize(axb);
-  a0 = d3_geo_cartesianDot(axb, a0);
-  a1 = d3_geo_cartesianDot(axb, a1);
-  b0 = d3_geo_cartesianDot(axb, b0);
-  b1 = d3_geo_cartesianDot(axb, b1);
-  if (a0 > -ε && a1 < ε && b0 >- ε && b1 < ε) {
-    var i = d3_geo_spherical(axb);
-    return [i[0] * degrees, i[1] * degrees];
-  }
+import numpy as np
 
-  if (a0 < ε && a1 > -ε && b0 < ε && b1 > -ε) {
-    axb[0] = -axb[0], axb[1] = -axb[1], axb[2] = -axb[2];
-    var i = d3_geo_spherical(axb);
-    return [i[0] * degrees, i[1] * degrees];
-  }
-}
+from cartopy.transforms.geom_interpolate import to_cartesian
 
-function d3_geo_cartesian(spherical) {
-  var λ = spherical[0],
-      φ = spherical[1],
-      cosφ = Math.cos(φ);
-  return [
-    cosφ * Math.cos(λ),
-    cosφ * Math.sin(λ),
-    Math.sin(φ)
-  ];
-}
+def to_spherical(cartesian_p):
+    x, y, z = cartesian_p
+    lamb = np.arctan2(y, x)
+    phi = np.arcsin(np.clip(z, -1, 1))
+    return np.rad2deg(np.array([lamb, phi]))
+    
 
-function d3_geo_cartesianDot(a, b) {
-  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
+def normalise_vector(vect):
+    # Normalise a vector of any length into a unit vector.
+    vect = np.array(vect, dtype=np.float64)
+    vect /= np.sqrt(np.sum(vect**2))
+    return vect
 
-function d3_geo_cartesianCross(a, b) {
-  return [
-    a[1] * b[2] - a[2] * b[1],
-    a[2] * b[0] - a[0] * b[2],
-    a[0] * b[1] - a[1] * b[0]
-  ];
-}
 
-function d3_geo_cartesianNormalize(d) {
-  var l = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-  d[0] /= l;
-  d[1] /= l;
-  d[2] /= l;
-}
+def intersect(a0, a1, b0, b1):
+    # The intersection of two great circles on the sphere is just their
+    # intersection in 3d cartesian space projected onto the surface.
+    a0 = to_cartesian(a0)
+    a1 = to_cartesian(a1)
+    b0 = to_cartesian(b0)
+    b1 = to_cartesian(b1)
+    
+    a = np.cross(a0, a1)
+    b = np.cross(b0, b1)
+    a0 = np.cross(a, a0)
+    a1 = np.cross(a, a1)
+    b0 = np.cross(b, b0)
+    b1 = np.cross(b, b1)
 
-function d3_geo_spherical(cartesian) {
-  return [
-    Math.atan2(cartesian[1], cartesian[0]),
-    Math.asin(Math.max(-1, Math.min(1, cartesian[2])))
-  ];
-}
-"""
+    axb = normalise_vector(np.cross(a, b))
+    a0 = np.dot(axb, a0)
+    a1 = np.dot(axb, a1)
+    b0 = np.dot(axb, b0)
+    b1 = np.dot(axb, b1)
+
+    eps = 1e-16
+    if a0 >= -eps and a1 <= eps and b0 >= -eps and b1 <= eps:
+        return to_spherical(axb)
+    if a0 <= eps and a1 >= -eps and b0 <= eps and b1 >= -eps:
+        return to_spherical(-axb)
+
+
+
+
+
+if __name__ == '__main__':
+    from nose.tools import assert_equal
+    from numpy.testing import assert_almost_equal
+    assert_almost_equal(np.array([0, 0]),
+                        intersect((-40, 0), (40, 0), (0, 40), (0, -40)),
+                        decimal=6)
+    
+    assert_almost_equal(np.array([0, 0]),
+                        intersect((-40, 0), (100, 0), (20, 40), (-20, -40)),
+                        decimal=6)
+    
+    assert_equal(None,
+                 intersect((-160, 0), (100, 0), (20, 40), (-20, -40))
+                 )
+    assert_almost_equal((180, 0),
+                        intersect((-160, 0), (160, 0), (180, -40), (180, 40)),
+                        decimal=6)
+
+#     print intersect((-31, 0), (30, 0), (-16, 0), (15, 0))
+    
+    print intersect((180, 10), (160, 20), (180, 0), (180, 90))
+     
