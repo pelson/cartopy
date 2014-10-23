@@ -97,6 +97,15 @@ class Precision(object):
         self.angular_distance_squared = np.cos(np.deg2rad(min_angular_distance))
 
 
+
+def cartesian_interp_fn(p0, p1):
+    dx = p0[0] - p1[0]
+    dy = p0[1] - p1[1]
+    def interpolator(t):
+        return p1[0] + t * dx, p1[1] + t * dy
+    return interpolator
+
+
 def interpolate_and_project_path(path, project_fn, interpolator_creation_fn, precision):
     # NOTE: This algorithm is pretty dumb and may well lead to some cases of un-preserved geometry
     # when a poor precision is used.

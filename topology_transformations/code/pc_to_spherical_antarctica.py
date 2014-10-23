@@ -15,7 +15,7 @@ def continent(name):
     for country in countries:
         if country.attributes['continent'] == name:
             shapes.append(country.geometry)
-    
+
     from shapely.ops import cascaded_union
     geom = cascaded_union(shapes)
     return geom
@@ -31,11 +31,6 @@ import matplotlib.path as mpath
 path = mpath.Path.make_compound_path(*cpatch.geos_to_path(geom))
 import matplotlib.patches as mpatches
 fig = plt.figure(figsize=(9, 4))
-
-
-print path.vertices
-
-
 
 
 import matplotlib.patheffects as path_effects
@@ -66,9 +61,6 @@ import numpy as np
 # # print path.vertices[:, 0].min()
 # # print np.sum(bad)
 # path = mpath.Path(verts, codes, closed=False)
-
-
-
 
 
 ax2 = plt.subplot(1, 2, 2, sharex=ax1, sharey=ax1)

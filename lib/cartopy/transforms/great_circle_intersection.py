@@ -31,7 +31,7 @@ def intersect(a0, a1, b0, b1):
     a1 = to_cartesian(a1)
     b0 = to_cartesian(b0)
     b1 = to_cartesian(b1)
-    
+
     a = np.cross(a0, a1)
     b = np.cross(b0, b1)
     a0 = np.cross(a, a0)
@@ -50,7 +50,7 @@ def intersect(a0, a1, b0, b1):
         return to_spherical(axb)
     if a0 <= eps and a1 >= -eps and b0 <= eps and b1 >= -eps:
         return to_spherical(-axb)
-
+    return None
 
 
 
@@ -61,11 +61,11 @@ if __name__ == '__main__':
     assert_almost_equal(np.array([0, 0]),
                         intersect((-40, 0), (40, 0), (0, 40), (0, -40)),
                         decimal=6)
-    
+
     assert_almost_equal(np.array([0, 0]),
                         intersect((-40, 0), (100, 0), (20, 40), (-20, -40)),
                         decimal=6)
-    
+
     assert_equal(None,
                  intersect((-160, 0), (100, 0), (20, 40), (-20, -40))
                  )
@@ -74,6 +74,6 @@ if __name__ == '__main__':
                         decimal=6)
 
 #     print intersect((-31, 0), (30, 0), (-16, 0), (15, 0))
-    
+
     print intersect((180, 10), (160, 20), (180, 0), (180, 90))
-     
+

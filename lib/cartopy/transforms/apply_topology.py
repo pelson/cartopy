@@ -77,13 +77,6 @@ class SphericalTopologyGeometry(object):
 
 
 
-
-
-
-
-
-
-
 if __name__ == '__main__':
     topo = [topology.CutLine([[180, -90], [180, 90]])]
     

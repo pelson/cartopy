@@ -46,6 +46,7 @@ Cartopy separates the process of transforming a projected geometry to another pr
  2. Transform the geometry from spherical topology to the topology of the target projection.
  3. Interpolate the geometry to a suitable precision in the target projection's coordinate system.
 
+
 Phase one: Source topolgy to spherical topology
 ################################################
 
@@ -79,6 +80,7 @@ The coordinate **values** of the original geometry are still preserved, except f
 .. plot::
     code/spherical_antarctica_to_pc180.py
 
+
 Phase Three: Interpolate to arbitrary precision
 ################################################
 
@@ -93,19 +95,4 @@ Armed with these two functions, we traverse the geometry, interpolating each seg
 
 .. plot::
     code/interpolate.py
-
- 
-
-
-
-
-
-
-
-
-
-
-
-
-
 

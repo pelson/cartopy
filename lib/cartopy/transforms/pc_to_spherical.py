@@ -107,7 +107,7 @@ def cut_segments(segments):
 
 def spherical_equal(p0, p1):
     # TODO: Accept a fn which converts to spherical.
-    if (p0[0] + 720) % 360 == (p0[0] + 720) % 360:
+    if (p0[0] + 720) % 360 == (p1[0] + 720) % 360:
         return p0[1] == p1[1]
     else:
         return False

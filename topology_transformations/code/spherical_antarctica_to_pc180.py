@@ -33,11 +33,6 @@ import matplotlib.patches as mpatches
 fig = plt.figure(figsize=(9, 4))
 
 
-print path.vertices
-
-
-
-
 import matplotlib.patheffects as path_effects
 effect = [path_effects.withStroke(linewidth=5, foreground='black')]
 
@@ -117,7 +112,6 @@ for ring in rings:
         else:
             joins.append([ring[i - 1], ring[(i + 1) % n]])
     ring = np.array(new_ring)
-    print len(ring)
     x, y = zip(*ring)
     ax1.plot(x, y, lw=3, color='gray', alpha=0.8)
 
