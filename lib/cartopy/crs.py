@@ -536,6 +536,9 @@ class _RectangularProjection(Projection):
         self._half_width = half_width
         self._half_height = half_height
         super(_RectangularProjection, self).__init__(proj4_params, globe=globe)
+#        from cartopy.transforms.topology import Pole, Antimeridian
+        # Coordinates are in rotated lons and lats.
+#        self._topology = [Pole(90), Antimeridian(-179.9999), Antimeridian(179.9999), Pole(-90)]
 
     @property
     def boundary(self):

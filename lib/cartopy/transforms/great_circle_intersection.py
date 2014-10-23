@@ -24,7 +24,7 @@ def normalise_vector(vect):
     return vect
 
 
-def intersect(a0, a1, b0, b1):
+def intersect(a0, a1, b0, b1, inclusive_lh=True):
     # The intersection of two great circles on the sphere is just their
     # intersection in 3d cartesian space projected onto the surface.
     a0 = to_cartesian(a0)
@@ -46,6 +46,9 @@ def intersect(a0, a1, b0, b1):
     b1 = np.dot(axb, b1)
 
     eps = 1e-16
+    if not inclusive_lh and -eps < a0 < eps:
+        return
+    # XXX Just checking it crossed the sign?
     if a0 >= -eps and a1 <= eps and b0 >= -eps and b1 <= eps:
         return to_spherical(axb)
     if a0 <= eps and a1 >= -eps and b0 <= eps and b1 >= -eps:
@@ -53,7 +56,34 @@ def intersect(a0, a1, b0, b1):
     return None
 
 
+def gc_intersect_point(a0, a1, b0):
+    a0 = to_cartesian(a0)
+    a1 = to_cartesian(a1)
+    b0 = to_cartesian(b0)
+    b1 = to_cartesian([b0[0] + 10, b0[0] + 10])
 
+    a = np.cross(a0, a1)
+    b = np.cross(b0, b1)
+    a0 = np.cross(a, a0)
+    a1 = np.cross(a, a1)
+    b0 = np.cross(b, b0)
+    b1 = np.cross(b, b1)
+
+    axb = normalise_vector(np.cross(a, b))
+    a0 = np.dot(axb, a0)
+    a1 = np.dot(axb, a1)
+    b0 = np.dot(axb, b0)
+    b1 = np.dot(axb, b1)
+
+    eps = 1e-15
+    if np.sign(a0) != np.sign(a1) and -eps < b0 < eps:
+        return True
+    else:
+        return False
+#        if b0 >= -eps:
+#            return to_spherical(-axb)
+#        else:
+#            return to_spherical(-axb)
 
 if __name__ == '__main__':
     from nose.tools import assert_equal
@@ -76,4 +106,12 @@ if __name__ == '__main__':
 #     print intersect((-31, 0), (30, 0), (-16, 0), (15, 0))
 
     print intersect((180, 10), (160, 20), (180, 0), (180, 90))
+    print intersect((180, 10), (160, 20), (180, 0), (180, 90), inclusive_lh=False)
+
+    print intersect((180, 0), (170, 10), (180, 0), (180, 90))
+
+    print gc_intersect_point((180, 0), (170, 10), (180, 0))
+    print gc_intersect_point((180, 90), (170, 70), (120, 90))
+    print gc_intersect_point((180, 0), (170, 10), (180, 10))
+    print gc_intersect_point((0, 80), (180, 80), (190, 90))
 

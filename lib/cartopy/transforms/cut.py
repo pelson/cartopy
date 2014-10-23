@@ -38,6 +38,23 @@ def lon_equal(lon0, lon1):
     return (lon0 + 720) % 360 == (lon1 + 720) % 360
 
 class Antimeridian(object):
+    def line(self, central_longitude=0, npole_latitude=90):
+        """Return the antimeridian line in spherical coordinates."""
+        eps = 1e-13
+        nearly_polar = central_longitude - 180 + eps, npole_latitude - eps
+
+        am_in_rotated = [[-nearly_polar[0], -nearly_polar[1]], [-nearly_polar[0], 0], [-nearly_polar[0], nearly_polar[1]]]
+
+        from cartopy.transforms.euler_angles import UM_rotated_pole_inverse
+        rot_to_ll = UM_rotated_pole_inverse(*nearly_polar)
+
+        am_in_ll = [rot_to_ll(*vert) for vert in am_in_rotated]
+
+        # XXX Cut pole from antimeridian line
+        from cartopy.transforms.topology import Cylindrical
+        topo = Cylindrical(central_longitude, npole_latitude)
+        return topo.poles.cut(am_in_ll)
+
     def cut_spherical(self, vertices, epsilon=1):
         """
         Cut the given spherical vertices based on whether they cross the antimeridian.
@@ -52,6 +69,7 @@ class Antimeridian(object):
 
         ring = [vertices[0]]
         result = [ring]
+        # Has now been copied to topology.Antimeridian.
         for i in range(n - 1):
             p0, p1 = vertices[i], vertices[i + 1]
 
@@ -168,3 +186,6 @@ if __name__ == '__main__':
     # A simple ring containing the south pole.
     segments = [(-180, 30), (180, 30), Ellipsis]
     print cut_antimeridian_crossing_ring(segments, None, rotate(0))
+
+
+

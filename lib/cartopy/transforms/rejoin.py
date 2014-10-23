@@ -1,3 +1,4 @@
+import numpy as np
 
 class IntersectionPoint(object):
     def __init__(self, xy, prev_intersection=None, next_intersection=None,
@@ -31,9 +32,6 @@ class Cutter(object):
     def __init__(self, polygon, sort_fn):
         self.polygon = polygon
         self.sort_fn = sort_fn
-
-    def do_it(self, clip):
-        self.phase_one(clip)
 
     def attach_segments(self, segments, clip_starts_inside_polygon, interpolation_fn):
         # Phase 1. Get the intersection (i.e. edge) points in two
@@ -100,7 +98,7 @@ class Cutter(object):
                 points = current.vertices
                 is_subject = not is_subject
                 current_visited = current.visited
-            if poly[0] != poly[-1]:
+            if np.all(poly[0] != poly[-1]):
                 poly.append(poly[0])
             polygons.append(poly)
 
@@ -110,7 +108,7 @@ class Cutter(object):
         rings = []
         for segment in segments:
             # Remove the geometries which are not clipped.
-            if segment[0] == segment[-1]:
+            if np.all(segment[0] == segment[-1]):
                 rings.append(segment)
                 continue
 

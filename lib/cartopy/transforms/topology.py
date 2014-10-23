@@ -8,263 +8,243 @@ Algorithm for arbitrary geometry/path transformation from CRS to CRS.
  - Apply interpolation to the pseudo-target geometry to form real geometries at arbitrary precision.
 
 """
-import shapely.geometry as sgeom
+
+
+class ProjectedLineString(list):
+    def __repr__(self):
+        r = super(ProjectedLineString, self).__repr__()
+        return 'PLS({})'.format(r)
+
+class ProjectedPoint(list):
+    def __repr__(self):
+        r = super(ProjectedPoint, self).__repr__()
+        return 'NativeP({})'.format(r)
 
 
 class TopologyTransformation(object):
-    def forward(self, p0, p1):
+    def forward(self, p0, p1self_coordinates_to_p0p1_fn, p0p1_cs_intersection_fn):
         """
         Takes the segment to the manifold that this
         transformation represents.
-        
-        """
-        return None
-    
-    def inverse(self, p0, p1):
-        """
-        Takes the segment back from the manifold that
-        this transformation represents.
 
-        XXX We can't do this on a segment basis - we need to have more than one segment to re-join it!!!
+        Let any follow-up function deal with whether the cut is on the
+        "right side" of the projected cs.
 
         """
+        raise NotImplementedError()
+
+    def prep(self, self_coordinates_to_p0p1_fn):
         return None
+
+    def cut_spherical(self, segments, f1, f2):
+        ring = [segments[0]]
+        rings = [ring]
+        prep = self.prep(f1)
+        for i in range(len(segments) - 1):
+            p0, p1 = segments[i], segments[i + 1]
+            r = self.forward(prep, p0, p1, f1, f2)
+            if len(r) == 1:
+                ring.extend(r[0])
+            elif len(r) == 2:
+                # Cut, and start a new segment.
+                ring.extend(r[0])
+                ring = list(r[1])
+                rings.append(ring)
+            elif len(r) == 3:
+                # Cut, insert a segment, and start a new one.
+                # XXX The middle-segment should be in the coordinate system of this topology.
+                ring.extend(r[0])
+                ring = r[2]
+                rings.extend([r[1], ring])
+        return rings
+
+    def cut_multisegments(self, msegments, f1, f2):
+        result = []
+        for segments in msegments:
+            print 'Cutting ', segments
+            if isinstance(segments, ProjectedLineString):
+                result.append(segments)
+                print 'Skipping', segments
+            else:
+                r = self.cut_spherical(segments, f1, f2)
+                print 'R;', r
+                result.extend(r)
+            print
+        return result
+
 
 class PointToLine(TopologyTransformation):
     def __init__(self, p0, line):
-        self.p0 = p0
-        self.line = line
+        self.p0 = ProjectedPoint(p0)
+        self.line = ProjectedLineString(line)
 
-    def forward(self, p0, p1):
-        # TODO: Use a spherical (i.e. great circle) intersection algorithm.
-        import numpy as np
-        c = np.array([p0, p1], dtype=float)
-        ls = sgeom.LineString(c)
-        if ls.intersects(sgeom.Point(self.p0)):
-            return [[p0, self.p0],#, 'PLACEHOLDER'],
-#                    ['PLACEHOLDER', 
-                     [self.p0, p1]]
+    def prep(self, self_coordinates_to_p0p1_fn):
+        return self_coordinates_to_p0p1_fn(*self.p0)
+
+    def forward(self, prep_result, p0, p1, self_coordinates_to_p0p1_fn, p0p1_cs_intersection_fn):
+        point_in_target = prep_result
+        intersects = p0p1_cs_intersection_fn(p0, p1, point_in_target)
+        if intersects:
+            return [[self.p0], self.line, [self.p0, p1]]
         else:
-            return None# [[p0, p1]]
-    
-    def inverse(self, p0, p1):
-        # TODO: Use a spherical (i.e. great circle) intersection algorithm.
-        import numpy as np
-        # dtype to deal with a shapely bug.
-        c = np.array([p0, p1], dtype=float)
-        ls = sgeom.LineString(c)
-        cline = sgeom.LineString(self.line)
-        if cline.contains(ls):
-            return [self.p0]
-        else:
-            return None
+            return [[p1]]
 
 
-class PointToPoint(TopologyTransformation):
-    # Needed?
-    pass
+class Antimeridian(TopologyTransformation):
+#    def __init__(self):
+#        self.plus_minus = 1e-8
 
-class LineToLine(TopologyTransformation):
-    def __init__(self, cut_line, replacement_line):
-        self.cut_line = cut_line
-        self.replacement_line = replacement_line
+    def prep(self, self_coordinates_to_p0p1_fn):
+        """
+        Return the antimeridian in the target coordinate system.
 
-    def forward(self, p0, p1):
-        # TODO: Use a spherical (i.e. great circle) intersection algorithm.
-        import numpy as np
-        # dtype to deal with a shapely bug.
-        c = np.array([p0, p1], dtype=float)
-        ls = sgeom.LineString(c)
-        cline = sgeom.LineString(self.cut_line)
-        if ls.intersects(cline):
-            intersection = ls.intersection(cline)
-            if isinstance(intersection, sgeom.Point):
-                r = [intersection.x, intersection.y]
-                return [[p0, r,],
-                        # 'PLACEHOLDER'],
-#                        ['PLACEHOLDER', 
-                         [r, p1]]
+        """
+        eps = 1e-13
+        nearly_polar = -180 + eps, 180 - eps
+
+        am_in_ll = [[-nearly_polar[0], -nearly_polar[1]],
+                    [-nearly_polar[0], 0],
+                    [-nearly_polar[0], nearly_polar[1]]]
+        return [self_coordinates_to_p0p1_fn(*vert) for vert in am_in_ll]
+
+    def forward(self, prep, p0, p1, self_coordinates_to_p0p1_fn, p0p1_cs_intersection_fn):
+        am_vertices = prep
+        n = len(am_vertices)
+
+        # At no point do we insert p0. That is done for us.
+        ring = []
+        result = [ring]
+        for i in range(n - 1):
+            am0, am1 = am_vertices[i], am_vertices[i + 1]
+            intersect = p0p1_cs_intersection_fn(p0, p1, am0, am1,
+                                                inclusive_lh=False)
+
+            if intersect is not None:
+                ring.append(intersect)
+                ring = [intersect, p1]
+                result.append(ring)
+                break
+        if not ring:
+            ring.append(p1)
+        return result
+
+#    
+#    def inverse(self, p0, p1):
+#        # TODO: Use a spherical (i.e. great circle) intersection algorithm.
+#        import numpy as np
+#        # dtype to deal with a shapely bug.
+#        c = np.array([p0, p1], dtype=float)
+#        ls = sgeom.LineString(c)
+#        rline = sgeom.LineString(self.replacement_line)
+#        if rline.intersects(ls):
+#            intersection = ls.intersection(rline)
+#            if isinstance(intersection, sgeom.Point):
+#                raise NotImplementedError()
+#            elif isinstance(intersection, sgeom.LineString):
+#                # XXX TODO: verify that the segment is a subset of the cut line.
+#                return ['PLACEHOLDER']
+#        else:
+#            return None
+
+
+def simple_spherical_cases():
+    from nose.tools import assert_equal
+
+    def to_list(rings):
+        return [map(list, ring) for ring in rings]
+
+    am = Antimeridian()
+
+    from cartopy.transforms.great_circle_intersection import intersect, gc_intersect_point
+
+    from cartopy.transforms.euler_angles import UM_rotated_pole_inverse, UM_rotated_pole
+    rot_to_ll = UM_rotated_pole_inverse(-180, 60)
+
+    segments = [[-180, 45], [-180, 85]]
+    r = am.cut_spherical(segments, rot_to_ll, intersect)
+    assert_equal(r, [[[-180, 45], [-180, 85]]])
+
+    segments = [[-170, 45], [170, 45]]
+    r = am.cut_spherical(segments, rot_to_ll, intersect)
+    assert_equal(to_list(r), [[[-170, 45], [-177.11473115547395, 45.402213450089143]],
+                              [[-177.11473115547395, 45.402213450089143], [170, 45]]])
+
+
+    # Single point intersection.
+    # The new line is in the target coordinate system. And the original
+    # coordinate is also in that cs. 
+    npole = PointToLine([0, 90], [[-180, 90], [180, 90]])
+    segments = [[-170, 40], [170, 60]]
+    r = npole.cut_spherical(segments, rot_to_ll, gc_intersect_point)
+    assert_equal(to_list(r), [[[-170, 40], [170, 60]]])
+
+    rot_to_ll = UM_rotated_pole_inverse(-180, 0)
+
+    npole = PointToLine([0, 90], [[-180, 90], [180, 90]])
+    segments = [[180, 0], [40, 40]]
+    r = npole.cut_spherical(segments, rot_to_ll, gc_intersect_point)
+    assert_equal(to_list(r), [[[180, 0], [180, 7.016709298534876e-15]],
+                              [[-180, 90], [180, 90]],
+                              [[180.0, 7.016709298534876e-15], [40, 40]]])
+
+
+def show_rp_cutting():
+    from cartopy.transforms.great_circle_intersection import intersect, gc_intersect_point
+    from cartopy.transforms.euler_angles import UM_rotated_pole, UM_rotated_pole_inverse
+    ll_to_rot = UM_rotated_pole(-180, 60)
+    rot_to_ll = UM_rotated_pole_inverse(-180, 60)
+
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    ax = plt.subplot(2, 1, 1, projection=ccrs.PlateCarree())
+    rp = ccrs.RotatedPole(-180, 30)
+    rgeod = ccrs.RotatedGeodetic(-180, 30)
+    geod = ccrs.Geodetic()
+    ax2 = plt.subplot(2, 1, 2, projection=rp)
+
+    npole = PointToLine([0, 90], [[-180, 90], [180, 90]])
+    am = Antimeridian()
+    segments = [[-180, -90], [-180, 0], [-180, 90]]
+    segments_result = am.cut_spherical(segments, ll_to_rot, intersect)
+
+    segments_result = npole.cut_multisegments(segments_result, rot_to_ll, gc_intersect_point)
+
+    def project_segments(msegments, source, target):
+        result = []
+        for segments in segments_result:
+            if isinstance(segments, ProjectedLineString):
+                result.append(segments)
             else:
-                # Verfiy this is just the exterior???
-                return [[p0, p1]]
-        else:
-            return None
-    
-    def inverse(self, p0, p1):
-        # TODO: Use a spherical (i.e. great circle) intersection algorithm.
-        import numpy as np
-        # dtype to deal with a shapely bug.
-        c = np.array([p0, p1], dtype=float)
-        ls = sgeom.LineString(c)
-        rline = sgeom.LineString(self.replacement_line)
-        if rline.intersects(ls):
-            intersection = ls.intersection(rline)
-            if isinstance(intersection, sgeom.Point):
-                raise NotImplementedError()
-            elif isinstance(intersection, sgeom.LineString):
-                # XXX TODO: verify that the segment is a subset of the cut line.
-                return ['PLACEHOLDER']
-        else:
-            return None
+                new_segments = [target.transform_point(point[0], point[1], source)
+                                if not isinstance(point, ProjectedPoint) else
+                                point
+                                for point in segments]
+                result.append(new_segments)
+        return result
 
-class CutLine(LineToLine):
-    def __init__(self, line):
-        LineToLine.__init__(self, line, line)
+    r = project_segments(segments_result, geod, rgeod)
 
+    for segments in r:
+        x, y = np.array(segments).T
+        x1, y1, _ = ax.projection.transform_points(rp, x, y).T
+        ax.plot(x1, y1, 'ob-', lw=4, alpha=0.5)
+        x1, y1, _ = ax2.projection.transform_points(rp, x, y).T
+        ax2.plot(x1, y1, 'ob-', lw=4, alpha=0.5)
+    ax.coastlines()
+    ax.gridlines(rp)
+    ax.set_global()
 
-class PointToInfiniteExterior(TopologyTransformation):
-    def __init__(self, p0):
-        self.p0 = p0
+    ax2.set_global()
+    ax2.coastlines()
+    ax2.gridlines()
 
-
-class PlateCarree():
-    def __init__(self):
-        self.topology = [
-                         # NOTE: The line depends on the projection parameters...
-                         PointToLine([0, 90], [[-180, 90], [180, 90]]),
-                         PointToLine([0, -90], [[-180, -90], [180, -90]]),
-                         # Note: Line in Spherical coords.
-                         CutLine([[180, -90], [180, 90]])
-                         ]
-
-class Robinson():
-    def __init__(self):
-        self.topology = [
-                         # Note: Line in Spherical coords.
-                         LineToLine([[180, -90], [180, 90]])
-                         ]
-
-
-
-class NPStereographic():
-    def __init__(self):
-        self.topology = [
-                         PointToInfiniteExterior([0, 90])
-                         ]
-
-
-def handle_segment(p0, p1, topology):
-    # Assume that topologies do not interfere with one another.
-    # If they do, then we could just define a topology which
-    # does a chained action anyway.
-    for topo in topology:
-        result = topo.forward(p0, p1)
-        if result is not None:
-            return result
-    return None
-
-
-def handle_inverse_segment(p0, p1, topology):
-    # Assume that topologies do not interfere with one another.
-    # If they do, then we could just define a topology which
-    # does a chained action anyway.
-    for topo in topology:
-        result = topo.inverse(p0, p1)
-        if result is not None:
-            return result
-    return None
-
-
-def simple_cases():
-#     # Single point intersection.
-#     print handle_segment([0, 80], [0, 100],
-#                          [PointToLine([0, 90], [[-180, 90], [180, 90]])])
-# 
-    # Single point intersection.
-    print handle_segment([-190, 80], [-170, 70],
-                         [CutLine([[-180, -90], [-180, 90]])])
-
-#    # Single point intersection.
-#    print handle_segment([170, 20], [190, 10],
-#                         [CutLine([[180, -90], [180, 90]])])
-#
-#    # Along cut line.
-#    print handle_segment([-180, 60], [-180, 80],
-#                         [CutLine([[-180, -90], [-180, 90]])])
-#
-#    # No impact.
-#    print handle_segment([-160, 60], [-150, 80],
-#                         [CutLine([[-180, -90], [-180, 90]])])
-
-    # Single point intersection.
-    print handle_inverse_segment([10, 90], [40, 90],
-                                 [PointToLine([0, 90], [[-180, 90], [180, 90]])])
-
-    print handle_inverse_segment([-180, 40], [-180, 55],
-                                 [CutLine([[-180, -90], [-180, 90]])])
-
-
-import numpy as np
-
-
-def crosses_antipodal_line(p0, p1, xy_to_spherical):
-    x0, x1 = p0[0], p1[0]
-
-    x0_gt_x1 = x0 > x1
-
-    if x0 == x1:
-        return False
-    else:
-        orig_direction = (x1 - x0) / 2
-
-    sp0 = xy_to_spherical(*p0)
-    sp1 = xy_to_spherical(*p1)
-
-    sx0, sx1 = sp0[0], sp1[0]
-
-    sx0_gt_sx1 = sx0 > sx1
-
-    if sx0 == sx1:
-        raise ValueError('Full circle?')
-    else:
-        new_direction = (sx1 - sx0) / 2
-
-    if sx0_gt_sx1 != x0_gt_x1:
-        return new_direction != orig_direction
-    else:
-        return new_direction == orig_direction
+    plt.show()
 
 
 if __name__ == '__main__':
-#    simple_cases()
+#    simple_spherical_cases()
+    show_rp_cutting()
 
-    import cartopy.crs as ccrs
-    from functools import partial
-
-    pc_to_spherical = partial(ccrs.Geodetic().transform_point, src_crs=ccrs.PlateCarree())
-    # XXX TODO: test perfect sphere transform.
-
-    p0 = (170, 0)
-    p1_crosses = (190, 0)
-    p1_same_side = (-170, 0)
-    p0_plus_360 = (170 + 360, 0)
-
-    assert crosses_antipodal_line(p0, p1_crosses, pc_to_spherical) == True
-    assert crosses_antipodal_line(p1_crosses, p0, pc_to_spherical) == True
-
-    assert crosses_antipodal_line(p0, p1_same_side, pc_to_spherical) == False
-    assert crosses_antipodal_line(p1_same_side, p0, pc_to_spherical) == False
-
-    assert crosses_antipodal_line(p0, p0_plus_360, pc_to_spherical) == True
-    assert crosses_antipodal_line(p0_plus_360, p0, pc_to_spherical) == True
-
-    assert crosses_antipodal_line(p0, p0, pc_to_spherical) == False
-
-    pc_to_spherical = partial(ccrs.Geodetic().transform_point, src_crs=ccrs.PlateCarree(central_longitude=180))
-
-    p0 = (-10, 0)
-    p1_crosses = (10, 0)
-    p1_same_side = (-350, 0)
-    p0_plus_360 = (-10 + 360, 0)
-
-    assert crosses_antipodal_line(p0, p1_crosses, pc_to_spherical) == True
-    assert crosses_antipodal_line(p1_crosses, p0, pc_to_spherical) == True
-
-    assert crosses_antipodal_line(p0, p1_same_side, pc_to_spherical) == False
-    assert crosses_antipodal_line(p1_same_side, p0, pc_to_spherical) == False
-
-    assert crosses_antipodal_line(p0, p0_plus_360, pc_to_spherical) == True
-    assert crosses_antipodal_line(p0_plus_360, p0, pc_to_spherical) == True
-
-    assert crosses_antipodal_line(p0, p0, pc_to_spherical) == False
-
+#    r = move_spherical_segment([[170, 60], [180, 60]])
+#    r = move_spherical_segment([[180, 60], [-170, 60]])

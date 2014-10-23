@@ -14,6 +14,9 @@ ll_to_rot = UM_rotated_pole(-180, 60)
 
 am_in_ll = [[-180, -90], [-180, 0], [-180, 90]]
 nearly_polar = 179.999999, 89.999999
+nearly_polar = 180, 89.999999999
+eps = 1e-13
+nearly_polar = 180 - eps, 90 - eps
 am_in_ll = [[-nearly_polar[0], -nearly_polar[1]], [-nearly_polar[0], 0], [-nearly_polar[0], nearly_polar[1]]]
 #am_in_ll = [[nearly_polar[0], -nearly_polar[1]], [nearly_polar[0], 0], nearly_polar]
 am_in_rot = [ll_to_rot(*vert) for vert in am_in_ll]
