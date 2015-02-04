@@ -95,7 +95,7 @@ def geos_to_path(shape):
 
 def path_segments(path, transform=None, remove_nans=False, clip=None,
                   quantize=False, simplify=False, curves=False,
-                  stroke_width=1.0, snap=False):
+                  stroke_width=1.0, snap=False, sketch=None):
     """
     Creates an array of vertices and a corresponding array of codes from a
     :class:`matplotlib.path.Path`.
@@ -202,6 +202,8 @@ def path_to_geos(path, force_ccw=False):
                 isinstance(geom, Polygon) and
                 collection[-1][0].contains(geom.exterior)):
             collection[-1][1].append(geom.exterior)
+        elif geom.is_empty:
+            pass
         else:
             collection.append((geom, []))
 
@@ -235,3 +237,117 @@ def path_to_geos(path, force_ccw=False):
     result = list(filter(not_zero_poly, geom_collection))
 
     return result
+
+
+def remove_bad_ends(verts, codes):
+    """
+    Designed to remove empty sections from a polygon.
+    If this routine is used on lines, valid line components may be
+    removed incorrectly.
+
+    """
+    quiet = True
+    size = codes.size
+    remove = []
+    new_i = 0
+    minx_i = miny_i = 0
+    # We don't need to test the last vertex.
+    while new_i < (size - 1):
+        i = new_i
+        j = new_i = i + 1
+        x0, y0 = verts[i, :]
+        xj, yj = verts[j, :]
+        code = codes[j]
+
+        if x0 == xj and y0 == yj:
+            # A static point. Do we want to strip this?
+            continue
+        elif x0 == xj and i >= minx_i:
+            ind = 1
+            while x0 == xj and code != 1:
+#                print 'L:', j, code, x0, xj
+                # Update xj, yj and code for this j.
+                j += 1
+                if j >= size:
+                    break
+                xj, yj = verts[j, :]
+                code = codes[j]
+            j -= 1
+            minx_i = j + 1
+        elif y0 == yj and i >= miny_i:
+            ind = 0
+            while True:
+                if not quiet: print 'L:', j, code, y0, yj
+                # Update xj, yj and code for this j.
+                j += 1
+                if j >= size:
+                    if not quiet: print 'Breaking for j', j
+                    j -= 1
+                    break
+                oldxj, oldyj = xj, yj
+                xj, yj = verts[j, :]
+                code = codes[j]
+                if y0 != yj or code == 1:
+                    j -= 1
+                    break
+            miny_i = j + 1
+        else:
+            continue
+
+        # We've now determined that we have a streak of values with a
+        # constant x or y (and we know whether it is the x or the y).
+        # Now look at the upper and lower values of that range, identifying
+        # the direction (increasing or decreasing) the numbers are going.
+        # Any value which does not follow that direction should be removed.
+        if not quiet: print 'Lower: {}; Upper: {}'.format(i, j)
+        xj, yj = verts[j, :]
+        if not quiet: print x0, xj, y0, yj
+        if ind == 0:
+#            direction = xj - x0
+            v0 = x0
+            vj = xj
+        else:
+#            direction = np.sign(yj - y0)
+            v0 = y0
+            vj = yj
+        v0, vj = sorted([v0, vj])
+        # We don't exclude the first value, nor the last, hence adding 1
+        for ni in range(i + 1, j):
+#            this_direction = np.sign(verts[ni, ind] - v0)
+            if not quiet: print 'D:', ni, v0, verts[ni, ind], vj
+#            if direction != this_direction:
+            if not (v0 < verts[ni, ind] <= vj):
+                remove.append(ni)
+            else:
+                # Update v0, making the range that the next value can lie
+                # within smaller.
+                new_v = verts[ni, ind]
+                v0, vj = sorted([new_v, vj])
+    return remove
+
+
+def remove_inds_from_path(path, indices):
+    """
+    Remove the given indices from the :class:`matplotlib.path.Path` instance.
+
+    Note: This algorithm is updating the vertices and codes *in-place*.
+
+    """
+    good = np.ones([path.codes.size, 2], dtype=np.bool)
+    good[indices, :] = False
+    path.vertices = path.vertices[good].reshape([-1, 2])
+    path.codes = path.codes[good[:, 0]]
+
+
+if __name__ == '__main__':
+    r_verts = [1, 3, 2, 2]
+    c_verts = [2] * 3 + [1]
+    codes = np.array([1, 2, 2, 2])
+    r_verts = [2, 3, 4, 2, 3, 4]
+    c_verts = [2, 2, 2, 2, 2, 2]
+    codes = np.array([1, 2, 2, 1, 2, 2])
+    verts = np.vstack([c_verts, r_verts]).T
+#    verts = np.vstack([r_verts, c_verts]).T
+
+    print verts
+    print remove_bad_ends(verts, codes)

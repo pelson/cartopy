@@ -1006,6 +1006,16 @@ class GeoAxes(matplotlib.axes.Axes):
                         sub_trans.force_path_ccw = True
 
         result = matplotlib.axes.Axes.contourf(self, *args, **kwargs)
+
+        # Go through each of the paths looking for badly formed geometries.
+        for col in result.collections:
+            for path in col.get_paths():
+                # Remove geometries such as those found in
+                # https://github.com/SciTools/cartopy/issues/509
+                bad_indices = cpatch.remove_bad_ends(path.vertices, path.codes)
+                if bad_indices:
+                    cpatch.remove_inds_from_path(path, bad_indices)
+
         self.autoscale_view()
         return result
 
