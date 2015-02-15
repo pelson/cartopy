@@ -146,6 +146,36 @@ class ShapelyFeature(Feature):
         return iter(self._geoms)
 
 
+class ShapefileFeature(Feature):
+    def __init__(self, fname, **kwargs):
+        if os.path.isdir(fname):
+            import glob
+            shp_files = glob.glob(os.path.join(fname, '*.shp'))
+            if len(shp_files) != 1:
+                raise ValueError('Expected to find 1 shp file. Found {}'.format(len(shp_files)))
+            fname = shp_files[0]
+        self.fname = fname
+        crs = None
+
+        import fiona
+        with fiona.collection(self.fname, 'r') as layer:
+            from fiona.crs import to_string
+            crs = to_string(layer.crs)
+            if crs == '+datum=WGS84 +k=1 +lat_0=-90 +lat_ts=-70 +lon_0=0 +no_defs +proj=stere +units=m +x_0=0 +y_0=0':
+                crs = cartopy.crs.Stereographic(central_latitude=-90, central_longitude=0, true_scale_latitude=-70)
+                
+        self._geoms = None
+        super(ShapefileFeature, self).__init__(crs=crs, **kwargs)
+
+    def geometries(self):
+        import fiona
+        from shapely.geometry import shape
+        if self._geoms is None:
+            with fiona.collection(self.fname, 'r') as layer:
+                shapes = [shape(element['geometry']) for element in layer]
+            self._geoms = shapes
+        return self._geoms
+
 class NaturalEarthFeature(Feature):
     """
     A simple interface to Natural Earth shapefiles.

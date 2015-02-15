@@ -120,7 +120,7 @@ class Downloader(object):
                                            this resource represents. If the
                                            file does not exist when
                                            :meth:`Downloader.path` is called
-                                           it will not be downloaded to this
+                                           it will *not* be downloaded to this
                                            location (unlike the
                                            ``target_path_template`` argument).
 
@@ -193,7 +193,7 @@ class Downloader(object):
         return self._formatter.format(self.pre_downloaded_path_template,
                                       **format_dict)
 
-    def path(self, format_dict):
+    def path(self, format_dict=None):
         """
         Returns the path to a file on disk that this resource represents.
 
@@ -214,6 +214,8 @@ class Downloader(object):
                               in their ``FORMAT_KEYS`` class attribute.
 
         """
+        if format_dict is None:
+            format_dict = {'config': config}
         pre_downloaded_path = self.pre_downloaded_path(format_dict)
         target_path = self.target_path(format_dict)
         if (pre_downloaded_path is not None and
@@ -322,6 +324,61 @@ class Downloader(object):
                              'dictionary for {}'.format(specification))
 
         return result_downloader
+
+
+class GenericDownloader(Downloader):
+    # Downloads a file. If it is a zip file, path will point to the unzipped directory.
+    # Uses SHA224 to generate a unique ID for a given URL. Collisions may occur as a result.
+    def __init__(self, url, subdir, pre_downloaded_path_template=''):
+        import urlparse
+        import hashlib
+
+        path = urlparse.urlparse(url).path
+        ext = os.path.splitext(path)[1]
+
+        sha = hashlib.sha224(url).hexdigest()
+
+        target_path_template = os.path.join("{config[data_dir]}", subdir, sha)
+        pre_downloaded_path_template = os.path.join("{config[pre_existing_data_dir]}", subdir, sha)
+        Downloader.__init__(self, url, target_path_template, pre_downloaded_path_template=pre_downloaded_path_template)
+
+    def acquire_resource(self, target_path, format_dict):
+        target_dir = os.path.dirname(target_path)
+        if not os.path.isdir(target_dir):
+            os.makedirs(target_dir)
+
+        url = self.url(format_dict)
+
+        # try getting the resource (no exception handling, just let it raise)
+        response = self._urlopen(url)
+        print(target_path)
+        response_data = response.read()
+        print(self.decompress(response_data, target_path))
+#         with open(target_path, 'wb') as fh:
+#             fh.write(response.read())
+        return target_path
+
+    def decompress(self, response_data, target_path):
+        magic_dict = {
+            "\x1f\x8b\x08": 'gz',
+            "\x42\x5a\x68": 'bz2',
+        }
+        def is_zip(fh):
+            try:
+                fh.seek(-22, 2)  # 22 Bytes from the end of the file.
+                endrec = fh.read()
+                if endrec[0:4] == "PK\005\006" and endrec[-2:] == "\000\000":
+                    return True    # file has correct magic number
+            except IOError:
+                pass
+
+        response_data = six.BytesIO(response_data)
+        if is_zip(response_data):
+            response_data.seek(0)
+            import zipfile
+            with zipfile.ZipFile(response_data) as zfh:
+                zfh.extractall(target_path)
+            # Write an info file?
 
 
 class LocatedImage(collections.namedtuple('LocatedImage', 'image extent')):
