@@ -1,70 +1,74 @@
 language: python
 
-python:
-  # This is not actually used. Because it would take an overly long time
+#python:
+#  # This is not actually used. Because it would take an overly long time
   # to build scipy we cannot use the virtual env of travis. Instead, we
   # use miniconda.
-  - 2.7
-  - 3.3
-  - 3.4
+#  - 2.7
+#  - 3.3
+ # - 3.4
+
+# NOTE: Please do not add new packages to CONDA_CONDITIONS without considering whether they
+# belong somewhere in requirements/*.txt. proj4 is a non-python dependency which falls into this category.
+env:
+ global:
+  - PEP8=1.5.7
+ matrix:
+# Test py2.7 with an older matplotlib
+ - PY_VERSION=2.7
+   CONDA_CONDITIONS="numpy=1.7 matplotlib=1.3 scipy=0.12 libpng=1.5 proj4=4.9 pep8=${PEP8}";
+# Test py2.7 with the latest matplotlib
+# - PY_VERSION=2.7
+#   CONDA_CONDITIONS="proj4=4.9 pep8=${PEP8}";
+# Test py2.7 with an older proj4
+# - PY_VERSION=2.7
+#   CONDA_CONDITIONS="numpy=1.7 matplotlib=1.3 scipy=0.12 libpng=1.5 proj4=4.8 pep8=${PEP8}";
+ - PY_VERSION=3.3
+   CONDA_CONDITIONS="numpy=1.7 matplotlib=1.3 scipy=0.12 libpng=1.5 proj4=4.9 pep8=${PEP8}";
+ - PY_VERSION=3.4
+   CONDA_CONDITIONS="numpy=1.8 matplotlib=1.3 scipy=0.14 libpng=1.5 proj4=4.9 pep8=${PEP8}"
 
 sudo: false
 
 git:
+  # We need a decent amount of history to check license dates.
   depth: 10000
 
 install:
   # Install miniconda
   # -----------------
-  - if [[ "$TRAVIS_PYTHON_VERSION" == 2* ]]; then
-      wget http://repo.continuum.io/miniconda/Miniconda-3.7.0-Linux-x86_64.sh -O miniconda.sh;
+  - if [[ "${PY_VERSION}" == 2* ]]; then
+      wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh;
     else
-      wget http://repo.continuum.io/miniconda/Miniconda3-3.7.0-Linux-x86_64.sh -O miniconda.sh;
+      wget http://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
     fi
   - bash miniconda.sh -b -p $HOME/miniconda
   - export PATH="$HOME/miniconda/bin:$PATH"
 
   # Create the basic testing environment
   # ------------------------------------
-  - conda config --set always_yes yes --set changeps1 no --set show_channel_urls yes
-  - conda update conda
-  - conda create -n test-environment python=$TRAVIS_PYTHON_VERSION
-  - source activate test-environment
-
-  # Customise the testing environment
-  # ---------------------------------
+  - conda config --set changeps1 no --set show_channel_urls yes
   - conda config --add channels scitools
-  - if [[ "$TRAVIS_PYTHON_VERSION" == 3.4 ]]; then
-      PACKAGES="numpy=1.8.2 matplotlib=1.3.1 scipy=0.14.0 libpng=1.5.*";
-    else
-      PACKAGES="numpy=1.7.1 matplotlib=1.3.1 scipy=0.12.0 libpng=1.5.*";
-    fi
-  - PACKAGES="$PACKAGES cython"
-  - PACKAGES="$PACKAGES pillow"
-  - PACKAGES="$PACKAGES mock"
-  - PACKAGES="$PACKAGES nose"
-  - if [[ "$TRAVIS_PYTHON_VERSION" == 2* ]]; then
-      PACKAGES="$PACKAGES owslib";
-    fi
-  - PACKAGES="$PACKAGES pep8=1.5.7"
-  - PACKAGES="$PACKAGES proj4=4.9"
-  - PACKAGES="$PACKAGES pyshp"
-  - PACKAGES="$PACKAGES shapely"
-  - PACKAGES="$PACKAGES six"
-  - PACKAGES="$PACKAGES requests"
-  - PACKAGES="$PACKAGES pyepsg"
-  - conda install $PACKAGES
+  - conda update conda --yes
+  - conda create -n test-environment --yes
+                                     --file=requirements/default.txt
+                                     --file=requirements/tests.txt
+                                     --file=requirements/plotting.txt
+                                     --file=requirements/ows.txt
+                                     --file=requirements/epsg.txt
+                                     python=${PY_VERSION}
+                                     ${CONDA_CONDITIONS}
+  - source activate test-environment
+#  - PACKAGES="$PACKAGES requests"
 
-  # Conda debug
-  # -----------
+  # For traceability, list the installed packages.
   - conda list
 
+  # Configure matplotlib to use the agg backend.
   - MPL_CONFIG_DIR=~/.config/matplotlib
   - mkdir -p $MPL_CONFIG_DIR
   - echo "backend" ":" "agg" > $MPL_CONFIG_DIR/matplotlibrc
 
-  # Install cartopy
-  # ---------------
   - python setup.py --quiet install
 
 script:
