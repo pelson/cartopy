@@ -1,2 +1,5 @@
 conda:
     file: .ci/environment.yaml
+
+python:
+   setup_py_install: true
