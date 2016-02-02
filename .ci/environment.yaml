@@ -2,6 +2,7 @@ name: dev_cartopy_27
 channels:
 - scitools
 - defaults
+
 dependencies:
 - numpy
 - matplotlib
@@ -15,4 +16,5 @@ dependencies:
 - pyepsg
 - OWSLib
 - pillow
-
+#- gdal
+- iris

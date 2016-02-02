@@ -3,3 +3,8 @@ conda:
 
 python:
    setup_py_install: true
+   version: 2
+
+formats:
+   - html
+
