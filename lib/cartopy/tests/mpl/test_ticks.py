@@ -1,4 +1,4 @@
-# (C) British Crown Copyright 2011 - 2014, Met Office
+# (C) British Crown Copyright 2011 - 2016, Met Office
 #
 # This file is part of cartopy.
 #
@@ -51,7 +51,7 @@ def _format_lon(val, i):
         return '%.0fW' % abs(val)
 
 
-test_fn_suffix = '' if mpl.__version__ >= '1.5' else 'pre_mpl_1.5'
+test_fn_suffix = '' if mpl.__version__ >= '1.5' else '_pre_mpl_1.5'
 
 
 @ImageTesting(['xticks_no_transform' + test_fn_suffix], tolerance=0.12)
