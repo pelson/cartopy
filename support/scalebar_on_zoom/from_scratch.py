@@ -30,12 +30,9 @@ class ScaleBarArtist(matplotlib.artist.Artist):
                           linewidth=3, units='km'):
         ax_to_data = ax.transAxes - ax.transData
         center = ax_to_data.transform_point([0.5, 0.1])
-        print(center)
         w0 = (ax_to_data.transform_point([0.55, 0.1])[0] - center[0]) * 2
         w1 = (ax_to_data.transform_point([0.625, 0.1])[0] - center[0]) * 2
         line_gen = center_align_line_generator(center[0], center[1], w0, w1, self.axes.projection)
-        line_gen = center_align_line_generator(center[0], center[1], w0, w1, self.axes.projection)
-        print('f:', center, w0, w1)
         r = pick_best_scale_length(line_gen)
         line_start_stop = r[2]
         line = mlines.Line2D(
@@ -101,7 +98,7 @@ def determine_target_length(shortest, longest, allowed_n_ticks=(3, 4, 5)):
 
     """
     if longest <= shortest:
-        longest, shortest = shortest, longest
+        raise ValueError('shortest length must be shorter than longest.')
 
     n_digits = np.floor(np.log10(longest - shortest))
 
@@ -139,11 +136,11 @@ def center_align_line_generator(x_center, y, min_x_width, max_x_width, projectio
     """
     This implementation's strategy is to align the line center, taking equal parts off the line on both sides.
 
-    >>> import cartopy.crs as ccrs
-    >>> gen = center_align_line_generator(0, 0, 30000, 40000, ccrs.Mercator())
-    >>> next(gen)
-    >>> next(gen)
-    >>> next(gen)
+#    >>> import cartopy.crs as ccrs
+#    >>> gen = center_align_line_generator(0, 0, 30000, 40000, ccrs.Mercator())
+##    >>> next(gen)
+#    >>> next(gen)
+#    >>> next(gen)
 
     """
     # Infinite generator of lines, doing a binary search for some external
@@ -190,9 +187,18 @@ def line_len(line):
     """
     import cartopy.geodesic
     geod = cartopy.geodesic.Geodesic()
+    return geod.geometry_length(line.T)
     distances, azi_0, azi_1 = np.array(
-        geod.inverse(line[:, -1], line[:, 1:]).T)
-    return np.sum(distances)
+        geod.inverse(line[:, 2], line[:, 1:]).T)
+    print('distances:', distances, azi_1)
+    return np.sum(np.abs(distances))
+
+
+def test_line_len():
+    line = np.array(
+        [[-111.6 + 360, -105.3 + 360, -97.8 + 360],
+         [  16.0,   18.7, 21.9]])
+    assert 100000 < line_len(line) < 1000000
 
 
 def pick_best_scale_length(line_gen):
@@ -208,9 +214,7 @@ def pick_best_scale_length(line_gen):
     _, shortest_line = next(line_gen)
     _, longest_line = next(line_gen)
 
-    if line_len(longest_line) < line_len(shortest_line):
-        longest_line, shortest_line = shortest_line, longest_line
-
+    print(repr(longest_line))
     target_length, step = determine_target_length(
         line_len(shortest_line), line_len(longest_line)
     )
@@ -218,35 +222,38 @@ def pick_best_scale_length(line_gen):
     DEBUG('Target: {}; lhs: {}; rhs: {};'.format(target_length, line_len(shortest_line), line_len(longest_line)))
     for iteration, r in enumerate(line_gen):
         # Avoid infinite loops
-        if iteration > 400:
+        if iteration > 20:
             raise RuntimeError('Unable to determine a sensible length. Target: {}; now: {};'.format(target_length, length))
         line_start_stop, line = r
         length = line_len(line)
         DEBUG('Target: {}; now: {};'.format(target_length, length))
         if length < target_length:
-            _, line_gen.send(False)
+            line_gen.send(False)
+            lh_len = length
         else:
-            _, line_gen.send(True)
+            line_gen.send(True)
+            rh_len = length
         # Iterate until we have an accuracy of 6 significant figures.
         if np.abs(length - target_length) / target_length < 0.000001:
             break
     return target_length, step, line_start_stop, line
 
-
-if __name__ == '__main__':
+def test_integration_of_components():
     center = [-6484360.33870819, 2878445.5153896]
     w0 = 829330.2064098883
     w1 = 2073325.51602472
     line_gen = center_align_line_generator(center[0], center[1], w0, w1, ccrs.Mercator())
 
-    print(next(line_gen))
-    print(next(line_gen))
+    shortest = next(line_gen)
+    longest = next(line_gen)
+    print(shortest, line_len(shortest[1]))
+    print(longest, line_len(longest[1]))
     print(next(line_gen))
     line_gen = center_align_line_generator(center[0], center[1], w0, w1, ccrs.Mercator())
     r = pick_best_scale_length(line_gen)
 
-if False:
-    ax = plt.axes(projection=ccrs.Mercator())
+if __name__ == '__main__':
+    ax = plt.axes(projection=ccrs.Robinson())
     ax.set_extent([-21, -95.5, 14, 76], ccrs.Geodetic())
     ax.stock_img()
     ax.coastlines(resolution='110m')
