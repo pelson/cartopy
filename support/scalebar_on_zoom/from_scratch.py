@@ -11,12 +11,20 @@ import matplotlib.lines as mlines
 import matplotlib.text as mtext
 
 def DEBUG(msg):
-    print(msg)
+    #print(msg)
     pass
 
 
 class ScaleBarArtist(matplotlib.artist.Artist):
-    def __init__(self):
+    def __init__(self, location=(0.5, 0.075), width_range=(0.15, 0.3)):
+
+        #: The position of the scalebar in Axes coordinates.
+        self.location = np.array(location)
+
+        #: The valid range of widths, in Axes coordinates, of the
+        #: scalebar.
+        self.width_range = width_range
+
         super(ScaleBarArtist, self).__init__()
 
     @matplotlib.artist.allow_rasterization
@@ -26,22 +34,31 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         for artist in self.scale_bar_artists():
             artist.draw(renderer)
 
-    def scale_bar_artists(self, location=(0.5, 0.075), width_range=0.4,
-                          linewidth=3, units='km'):
+    def scale_bar_artists(self, linewidth=3, units='km'):
         ax_to_data = ax.transAxes - ax.transData
-        center = ax_to_data.transform_point([0.5, 0.1])
-        w0 = (ax_to_data.transform_point([0.55, 0.1])[0] - center[0]) * 2
-        w1 = (ax_to_data.transform_point([0.625, 0.1])[0] - center[0]) * 2
+        center = ax_to_data.transform_point(self.location)
+        p0 = self.location + [self.width_range[0] / 2, 0]
+        p1 = self.location + [self.width_range[1] / 2, 0]
+        w0 = (ax_to_data.transform_point(p0)[0] - center[0]) * 2
+        w1 = (ax_to_data.transform_point(p1)[0] - center[0]) * 2
         line_gen = center_align_line_generator(center[0], center[1], w0, w1, self.axes.projection)
         r = pick_best_scale_length(line_gen)
+        if r is None:
+            return []
         line_start_stop = r[2]
-        line = mlines.Line2D(
-            [line_start_stop[0][0], line_start_stop[1][0]], [line_start_stop[0][1], line_start_stop[1][1]],
-                             color='black', transform=self.axes.transData)
+        xs = np.array([line_start_stop[0][0], line_start_stop[1][0]])
+        ys = np.array([line_start_stop[0][1], line_start_stop[1][1]])
+        line = mlines.Line2D(xs, ys, color='black', transform=self.axes.transData)
         line.axes = self.axes
 
-        t = mtext.Text(line_start_stop[0][0], line_start_stop[0][1],
-                   '{} m'.format(r[0]), transform=self.axes.transData)
+        length = r[0]
+        units = 'm'
+        if length > 1000 and units == 'm':
+            length /= 1000
+            units = 'km'
+        t = mtext.Text(xs.sum() / 2, ys.sum() / 2,
+                       '\n{0} {1}'.format(length, units), transform=self.axes.transData,
+                       horizontalalignment='center', verticalalignment='center')
         t.axes = self.axes
         t.figure = self.figure
 
@@ -215,6 +232,8 @@ def pick_best_scale_length(line_gen):
     _, longest_line = next(line_gen)
 
     print(repr(longest_line))
+    if np.isnan(line_len(longest_line)) or np.isnan(line_len(shortest_line)):
+        return None
     target_length, step = determine_target_length(
         line_len(shortest_line), line_len(longest_line)
     )
@@ -253,7 +272,7 @@ def test_integration_of_components():
     r = pick_best_scale_length(line_gen)
 
 if __name__ == '__main__':
-    ax = plt.axes(projection=ccrs.Robinson())
+    ax = plt.axes(projection=ccrs.NorthPolarStereo())
     ax.set_extent([-21, -95.5, 14, 76], ccrs.Geodetic())
     ax.stock_img()
     ax.coastlines(resolution='110m')
@@ -261,6 +280,9 @@ if __name__ == '__main__':
     a.set_zorder(100)
     ax.add_artist(a)
 
+    a = ScaleBarArtist(location=(0.5, 0.95))
+    a.set_zorder(100)
+    ax.add_artist(a)
     #    scale_bar(ax, ccrs.Mercator(), 1000)  # 100 km scale bar
 
     # or to use m instead of km
