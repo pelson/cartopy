@@ -71,7 +71,7 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         line = mlines.Line2D(
             xs, ys,
             color='black',
-            transform=self.axes.transData, lw=3)
+            transform=self.axes.transData, path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
         line.axes = self.axes
         lines.insert(0, line)
 
@@ -80,10 +80,18 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         if length > 1000 and units == 'm':
             length /= 1000
             units = 'km'
+
+        import matplotlib.transforms as transforms
+        # shift the object down 4 points
+        dx, dy = 0 / 72., -4 / 72.
+        offset = transforms.ScaledTranslation(dx, dy,
+                                              self.figure.dpi_scale_trans)
+        shadow_transform = ax.transData + offset
+
         t = mtext.Text(xs.sum() / 2, ys.sum() / 2,
-                       '{0} {1}'.format(length, units), transform=self.axes.transData,
-                       horizontalalignment='center', verticalalignment='top')
-        t.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
+                       '{0} {1}'.format(length, units), transform=self.axes.transData + offset,
+                       horizontalalignment='center', verticalalignment='top', color='white')
+        t.set_path_effects([path_effects.withStroke(linewidth=3, foreground='black')])
         t.axes = self.axes
         t.figure = self.figure
 
