@@ -48,8 +48,31 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         line_start_stop = r[2]
         xs = np.array([line_start_stop[0][0], line_start_stop[1][0]])
         ys = np.array([line_start_stop[0][1], line_start_stop[1][1]])
-        line = mlines.Line2D(xs, ys, color='black', transform=self.axes.transData)
+
+        steps = r[1]
+        start, extreme_end = line_start_stop[0], [self.axes.projection.x_limits[1], line_start_stop[1][1]]
+        lines = []
+        line_start = start
+        for i, distance in enumerate(np.diff(steps)):
+            line_end = forward(self.axes.projection, line_start, extreme_end, distance)
+
+            xs = np.array([line_start_stop[0][0], line_start_stop[1][0]])
+            ys = np.array([line_start_stop[0][1], line_start_stop[1][1]])
+            line = mlines.Line2D(
+                [line_start[0], line_end[0]], [line_start[1], line_end[1]],
+                color='black' if i % 2 == 0 else 'white',
+                transform=self.axes.transData)
+            line.axes = self.axes
+            lines.append(line)
+
+            line_start = line_end
+
+        line = mlines.Line2D(
+            xs, ys,
+            color='black',
+            transform=self.axes.transData, lw=3)
         line.axes = self.axes
+        lines.insert(0, line)
 
         length = r[0]
         units = 'm'
@@ -62,7 +85,7 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         t.axes = self.axes
         t.figure = self.figure
 
-        return [line, t]
+        return lines + [t]
 
 
 
@@ -205,23 +228,17 @@ def line_len(line):
     import cartopy.geodesic
     geod = cartopy.geodesic.Geodesic()
     return geod.geometry_length(line.T)
-    distances, azi_0, azi_1 = np.array(
-        geod.inverse(line[:, 2], line[:, 1:]).T)
-    print('distances:', distances, azi_1)
-    return np.sum(np.abs(distances))
 
-
-def test_line_len():
-    line = np.array(
-        [[-111.6 + 360, -105.3 + 360, -97.8 + 360],
-         [  16.0,   18.7, 21.9]])
-    assert 100000 < line_len(line) < 1000000
 
 
 def pick_best_scale_length(line_gen):
     """
     Given the possible Axes coordinates that could be used to represent a scalebar,
-    return the best choice and its length (rounded to a nice form)
+    return the best choice and its length (rounded to a nice form).
+
+    Can return None if there is no possible scale for the given line. This occurs when
+    the line would be out of range of projection.
+
     """
     # Get the extreme lengths (first 2 lines)
     # This will give us the range of lines that are available to us.
@@ -231,7 +248,6 @@ def pick_best_scale_length(line_gen):
     _, shortest_line = next(line_gen)
     _, longest_line = next(line_gen)
 
-    print(repr(longest_line))
     if np.isnan(line_len(longest_line)) or np.isnan(line_len(shortest_line)):
         return None
     target_length, step = determine_target_length(
@@ -241,7 +257,7 @@ def pick_best_scale_length(line_gen):
     DEBUG('Target: {}; lhs: {}; rhs: {};'.format(target_length, line_len(shortest_line), line_len(longest_line)))
     for iteration, r in enumerate(line_gen):
         # Avoid infinite loops
-        if iteration > 20:
+        if iteration > 50:
             raise RuntimeError('Unable to determine a sensible length. Target: {}; now: {};'.format(target_length, length))
         line_start_stop, line = r
         length = line_len(line)
@@ -255,7 +271,10 @@ def pick_best_scale_length(line_gen):
         # Iterate until we have an accuracy of 6 significant figures.
         if np.abs(length - target_length) / target_length < 0.000001:
             break
+
+    # TODO: Remove the line itself?
     return target_length, step, line_start_stop, line
+
 
 def test_integration_of_components():
     center = [-6484360.33870819, 2878445.5153896]
@@ -265,13 +284,62 @@ def test_integration_of_components():
 
     shortest = next(line_gen)
     longest = next(line_gen)
-    print(shortest, line_len(shortest[1]))
-    print(longest, line_len(longest[1]))
-    print(next(line_gen))
     line_gen = center_align_line_generator(center[0], center[1], w0, w1, ccrs.Mercator())
     r = pick_best_scale_length(line_gen)
 
+
+def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, npts=20):
+    """
+    Return the end point of a straight line in the given projection, starting from
+    start_point and extending in the x direction until the line has the given distance.
+
+    This is an iterative solution which will terminate once the length reaches ``(abs(len - target) / target) < tol``.
+    """
+    if distance == 0:
+        raise RuntimeError('ZERO DISTANCE!?')
+    start = start_point
+    #end = projection.x_lim[1], start[1]
+    end = extreme_end_point
+
+    def line_length(start_point, end_point):
+        xs = np.linspace(start_point[0], end_point[0], npts)
+        ys = np.linspace(start_point[1], end_point[1], npts)
+        points_ll = ccrs.PlateCarree().transform_points(projection, xs, ys)[:, :2].T
+        return line_len(points_ll)
+    max_len = line_length(start, end)
+    if max_len < distance:
+        raise ValueError(
+            'It is not possible to construct a straight line '
+            'of length {} from {} in the x direction of this projection.'
+            ''.format(distance, start_point))
+    # Binary search of this line to get to the desired tolerance.
+    current_length = max_len
+    end_min = start
+    end_max = end
+
+    count = 0
+    while np.abs(current_length - distance) / distance > tol:
+        midpoint = (end_min[0] + end_max[0]) * 0.5, (end_min[1] + end_max[1]) * 0.5
+        current_length = line_length(start, midpoint)
+        if current_length < distance:
+            end_min = midpoint
+        else:
+            end_max = midpoint
+        if count < 100:
+            count += 1
+        else:
+            raise ValueError('Unable to iterate to sufficient accuracy.')
+    return midpoint
+
+
 if __name__ == '__main__':
+    start = 0, 0
+    v = forward(ccrs.PlateCarree(), start, [180, 0], 3000000)
+    print(v)
+    v = forward(ccrs.Mercator(), start, [1e6, 0], 30000)
+    print(v)
+
+
     ax = plt.axes(projection=ccrs.NorthPolarStereo())
     ax.set_extent([-21, -95.5, 14, 76], ccrs.Geodetic())
     ax.stock_img()
