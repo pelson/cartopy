@@ -9,6 +9,7 @@ import numpy as np
 
 import matplotlib.lines as mlines
 import matplotlib.text as mtext
+import matplotlib.patheffects as path_effects
 
 def DEBUG(msg):
     #print(msg)
@@ -50,7 +51,7 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         ys = np.array([line_start_stop[0][1], line_start_stop[1][1]])
 
         steps = r[1]
-        start, extreme_end = line_start_stop[0], [self.axes.projection.x_limits[1], line_start_stop[1][1]]
+        start, extreme_end = line_start_stop[0], [line_start_stop[1][0] + 0.1 * (self.axes.projection.x_limits[1] - self.axes.projection.x_limits[0]), line_start_stop[1][1]]
         lines = []
         line_start = start
         for i, distance in enumerate(np.diff(steps)):
@@ -80,8 +81,9 @@ class ScaleBarArtist(matplotlib.artist.Artist):
             length /= 1000
             units = 'km'
         t = mtext.Text(xs.sum() / 2, ys.sum() / 2,
-                       '\n{0} {1}'.format(length, units), transform=self.axes.transData,
-                       horizontalalignment='center', verticalalignment='center')
+                       '{0} {1}'.format(length, units), transform=self.axes.transData,
+                       horizontalalignment='center', verticalalignment='top')
+        t.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
         t.axes = self.axes
         t.figure = self.figure
 
@@ -288,17 +290,14 @@ def test_integration_of_components():
     r = pick_best_scale_length(line_gen)
 
 
-def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, npts=20):
+def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, npts=20, maxcount=100):
     """
     Return the end point of a straight line in the given projection, starting from
     start_point and extending in the x direction until the line has the given distance.
 
     This is an iterative solution which will terminate once the length reaches ``(abs(len - target) / target) < tol``.
     """
-    if distance == 0:
-        raise RuntimeError('ZERO DISTANCE!?')
     start = start_point
-    #end = projection.x_lim[1], start[1]
     end = extreme_end_point
 
     def line_length(start_point, end_point):
@@ -325,21 +324,34 @@ def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, 
             end_min = midpoint
         else:
             end_max = midpoint
-        if count < 100:
+        if count < maxcount:
             count += 1
         else:
             raise ValueError('Unable to iterate to sufficient accuracy.')
     return midpoint
 
+def test_forward_pc():
+    start = 0, 0
+    v = forward(ccrs.PlateCarree(), [-4, 50], [0, 50], 3000)
+    assert v[1] == 50
+    assert v[0] == pytest.approx(-3.9581565)
+
+
+def test_forward_mercator():
+    v = forward(ccrs.Mercator(), [0, 0], [1e6, 0], 30000, tol=0.0000001)
+    assert v[0] == pytest.approx(30000)
+
 
 if __name__ == '__main__':
-    start = 0, 0
-    v = forward(ccrs.PlateCarree(), start, [180, 0], 3000000)
-    print(v)
-    v = forward(ccrs.Mercator(), start, [1e6, 0], 30000)
-    print(v)
+    ax = plt.axes(projection=ccrs.OSGB())
+    ax.stock_img()
+    ax.coastlines(resolution='10m')
+    a = ScaleBarArtist()
+    a.set_zorder(100)
+    ax.add_artist(a)
+    plt.show()
 
-
+    plt.figure()
     ax = plt.axes(projection=ccrs.NorthPolarStereo())
     ax.set_extent([-21, -95.5, 14, 76], ccrs.Geodetic())
     ax.stock_img()
