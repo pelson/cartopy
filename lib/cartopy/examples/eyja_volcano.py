@@ -31,7 +31,9 @@ def main():
 
     # Add the Stamen data at zoom level 8.
 #    ax.add_image(stamen_terrain, 8)
-    src = cimgt.TileSource(stamen_terrain, 8)
+    src = cimgt.TileSource(stamen_terrain)
+    import cartopy.io.img_tile_caching as f
+    src = f.CachedTiler(src)
     ax.add_raster(src, origin='lower')
 
     # Add a marker for the Eyjafjallajökull volcano.

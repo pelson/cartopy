@@ -43,17 +43,19 @@ from . import LocatedImage
 
 
 class TileSource(object):
-    def __init__(self, tiler, target_z):
+    def __init__(self, tiler):
         self._tiler = tiler
-        self.target_z = target_z
-    
+
     def validate_projection(self, projection):
         if projection != self._tiler.crs:
             raise ValueError(
                 'Unable to handle projection {}'.format(projection))
 
-    def fetch_raster(self, projection, extent, target_resolution):
-        target_z = self.target_z
+    def fetch_raster_return_multiple(self,
+                                     projection,
+                                     extent,
+                                     target_resolution):
+        target_z = self._tiler.auto_z(extent, target_resolution, target_ratio=1.5)
         self = self._tiler
 
         x0, x1, y0, y1 = extent
@@ -73,8 +75,10 @@ class TileSource(object):
                 img = img[::-1, :]
             return LocatedImage(img, extent)
 
+        import concurrent.futures
+        self__MAX_THREADS = 24
         with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self._MAX_THREADS) as executor:
+                max_workers=self__MAX_THREADS) as executor:
             futures = []
             for tile in self.find_images(target_domain, target_z):
                 futures.append(executor.submit(fetch_tile, tile))
@@ -86,9 +90,15 @@ class TileSource(object):
 
         return images
 
+    def fetch_raster_return_one(self, projection, extent, target_resolution):
+        img, extent, origin = self._tiler.image_for_domain(
+                extent, self.target_z)
+        img = np.array(img)
+        if origin == 'lower':
+            img = img[::-1, :]
+        return [LocatedImage(img, extent)]
 
-#        img, extent, origin = self._tiler.image_for_domain(extent, self.target_z)
-#        return [LocatedImage(img, extent)]
+    fetch_raster = fetch_raster_return_multiple
 
 
 class GoogleWTS(six.with_metaclass(ABCMeta, object)):
@@ -117,7 +127,6 @@ class GoogleWTS(six.with_metaclass(ABCMeta, object)):
 
         img, extent, origin = _merge_tiles(tiles)
         return img, extent, origin
-
 
     def _find_images(self, target_domain, target_z, start_tile=(0, 0, 0)):
         """Target domain is a shapely polygon in native coordinates."""
@@ -201,6 +210,62 @@ class GoogleWTS(six.with_metaclass(ABCMeta, object)):
         return tuple(x_lim) + tuple(y_lim)
 
     _tileextent = tileextent
+
+    def auto_z(self, extent, target_resolution, target_ratio=1.0):
+        """
+        Given an extent and a resolution, compute an appropriate zoom level.
+
+        Parameters
+        ----------
+        extent: iterable of length 4
+            The extent of the requested image in Mercator coordinates.
+            Extents must be defined in the form
+            ``(min_x, max_x, min_y, max_y)``.
+        target_resolution: iterable of length 2
+            The desired resolution of the image as ``(width, height)`` in
+            pixels.
+        target_ratio: optional, number
+            The ratio to aim for in terms of
+            ``pixels_in_the_source / target_resolution``. Default is 1.
+            Increase this number to get a systematically higher zoom level,
+            and as a result more pixels from the source will go in to
+            producing the image in the target.
+
+        """
+        target_res = np.array(target_resolution)
+        x0, x1, y0, y1 = extent
+        full_x_range = np.diff(self.crs.x_limits)[0]
+        full_y_range = np.diff(self.crs.y_limits)[0]
+
+        # Compute the ratio of the requested extent from the global extent
+        x_r, y_r = (x1 - x0) / full_x_range, (y1 - y0) / full_y_range
+
+        best_z, best_z_distance = 0, np.inf
+        for z in range(30):
+            n = 2 ** z
+            # Compute number of x pixels at this zoom level.
+            n_x_pix = n_y_pix = 256 * n
+
+            actual_res = x_r * n_x_pix, y_r * n_y_pix
+
+            # Compute the ratio of what we would get / what we want.
+            # We will then pick the zoom level that gives us the closest to
+            # our target_ratio (where 1 means 1 pixel in the zoom level equates
+            # to 1 pixel in the target resolution and extent).
+            ratio = actual_res / target_res
+
+            distance = np.linalg.norm(ratio - target_ratio)
+            if distance < best_z_distance:
+                best_z = z
+                best_z_distance = distance
+
+            # If the distance has got worse (distance from our target ratio)
+            # and we are not on the first zoom level stop processing - we
+            # have found our best z already.
+            elif z > 0:
+                break
+
+        return best_z
 
     @abstractmethod
     def _image_url(self, tile):
