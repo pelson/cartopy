@@ -30,7 +30,9 @@ def main():
     ax.set_extent([-22, -15, 63, 65], crs=ccrs.Geodetic())
 
     # Add the Stamen data at zoom level 8.
-    ax.add_image(stamen_terrain, 8)
+#    ax.add_image(stamen_terrain, 8)
+    src = cimgt.TileSource(stamen_terrain, 8)
+    ax.add_raster(src, origin='lower')
 
     # Add a marker for the Eyjafjallajökull volcano.
     ax.plot(-19.613333, 63.62, marker='o', color='red', markersize=12,
@@ -49,7 +51,6 @@ def main():
             transform=text_transform,
             bbox=dict(facecolor='sandybrown', alpha=0.5, boxstyle='round'))
     plt.show()
-
 
 if __name__ == '__main__':
     main()

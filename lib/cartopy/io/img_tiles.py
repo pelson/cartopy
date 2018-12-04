@@ -39,6 +39,56 @@ import numpy as np
 import six
 
 import cartopy.crs as ccrs
+from . import LocatedImage
+
+
+class TileSource(object):
+    def __init__(self, tiler, target_z):
+        self._tiler = tiler
+        self.target_z = target_z
+    
+    def validate_projection(self, projection):
+        if projection != self._tiler.crs:
+            raise ValueError(
+                'Unable to handle projection {}'.format(projection))
+
+    def fetch_raster(self, projection, extent, target_resolution):
+        target_z = self.target_z
+        self = self._tiler
+
+        x0, x1, y0, y1 = extent
+        target_domain = sgeom.box(x0, y0, x1, y1)
+
+        images = []
+
+        def fetch_tile(tile):
+            try:
+                img, extent, origin = self.get_image(tile)
+            except IOError:
+                # Some services 404 for tiles that aren't supposed to be
+                # there (e.g. out of range).
+                raise
+            img = np.array(img)
+            if origin == 'lower':
+                img = img[::-1, :]
+            return LocatedImage(img, extent)
+
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._MAX_THREADS) as executor:
+            futures = []
+            for tile in self.find_images(target_domain, target_z):
+                futures.append(executor.submit(fetch_tile, tile))
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    images.append(future.result())
+                except IOError:
+                    pass
+
+        return images
+
+
+#        img, extent, origin = self._tiler.image_for_domain(extent, self.target_z)
+#        return [LocatedImage(img, extent)]
 
 
 class GoogleWTS(six.with_metaclass(ABCMeta, object)):
@@ -67,6 +117,7 @@ class GoogleWTS(six.with_metaclass(ABCMeta, object)):
 
         img, extent, origin = _merge_tiles(tiles)
         return img, extent, origin
+
 
     def _find_images(self, target_domain, target_z, start_tile=(0, 0, 0)):
         """Target domain is a shapely polygon in native coordinates."""
