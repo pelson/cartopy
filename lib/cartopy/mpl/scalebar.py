@@ -36,7 +36,8 @@ def DEBUG(msg):
 
 
 class ScaleBarArtist(matplotlib.artist.Artist):
-    def __init__(self, location=(0.5, 0.075), width_range=(0.15, 0.3)):
+    def __init__(self, location=(0.5, 0.075), width_range=(0.15, 0.3),
+                 line_kwargs=None, border_kwargs=None, text_kwargs=None):
 
         #: The position of the scalebar in Axes coordinates.
         self.location = np.array(location)
@@ -45,16 +46,31 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         #: scalebar.
         self.width_range = width_range
 
+        self.line_kwargs = line_kwargs or dict()
+        self.border_kwargs = border_kwargs or dict(color='black', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
+        self.text_kwargs = text_kwargs or dict(color='white', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
+        self.zorder = 50
+
         super(ScaleBarArtist, self).__init__()
 
-    @matplotlib.artist.allow_rasterization
+    def line_stylization(self, step_index, steps):
+        """
+        Given the step we are to draw, and a list of all
+        other steps that are going to be drawn, return a
+        style dictionary that can be merged with self.line_kwargs.
+        """
+        if step_index % 2:
+            return {'color': 'white'}
+        else:
+            return {'color': 'black'}
+
     def draw(self, renderer, *args, **kwargs):
         if not self.get_visible():
             return
-        for artist in self.scale_bar_artists():
+        for artist in self.scalebar_artists():
             artist.draw(renderer)
 
-    def scale_bar_artists(self, linewidth=3, units='km'):
+    def scalebar_artists(self, linewidth=3, units='km'):
         ax = self.axes
         ax_to_data = ax.transAxes - ax.transData
         center = ax_to_data.transform_point(self.location)
@@ -72,30 +88,50 @@ class ScaleBarArtist(matplotlib.artist.Artist):
 
         steps = r[1]
         start, extreme_end = line_start_stop[0], [line_start_stop[1][0] + 0.1 * (self.axes.projection.x_limits[1] - self.axes.projection.x_limits[0]), line_start_stop[1][1]]
+        lines = self.scale_lines(steps, start, line_start_stop, extreme_end)
+
+        outline = self.bar_outline(xs, ys)
+        if outline:
+            lines.insert(0, outline)
+
+        t = self.scale_text(xs, ys, r[0])
+        if t:
+            lines.append(t)
+
+        return lines
+
+    def scale_lines(self, steps, start, line_start_stop, extreme_end):
         lines = []
         line_start = start
         for i, distance in enumerate(np.diff(steps)):
             line_end = forward(self.axes.projection, line_start, extreme_end, distance)
 
+            line_style = self.line_stylization(i, steps)
+            #import cartopy.mpl.style as cms
+            #style = cms.merge(line_style, self.line_kwargs)
+            # Don't use cms.merge here because that assumed PathCollections, not lines.
+            line_style.update(self.line_kwargs)
+            style = line_style
+
             xs = np.array([line_start_stop[0][0], line_start_stop[1][0]])
             ys = np.array([line_start_stop[0][1], line_start_stop[1][1]])
             line = mlines.Line2D(
                 [line_start[0], line_end[0]], [line_start[1], line_end[1]],
-                color='black' if i % 2 == 0 else 'white',
-                transform=self.axes.transData)
+                transform=self.axes.transData, **style)
             line.axes = self.axes
             lines.append(line)
 
             line_start = line_end
+        return lines
+    def bar_outline(self, xs, ys):
+        # Put a nice border around the scalebar.
+        border = mlines.Line2D(
+                xs, ys, transform=self.axes.transData, **self.border_kwargs)
+        border.axes = self.axes
+        return border
 
-        line = mlines.Line2D(
-            xs, ys,
-            color='black',
-            transform=self.axes.transData, path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
-        line.axes = self.axes
-        lines.insert(0, line)
-
-        length = r[0]
+    def scale_text(self, xs, ys, bar_length):
+        length = bar_length
         units = 'm'
         if length > 1000 and units == 'm':
             length /= 1000
@@ -106,16 +142,14 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         dx, dy = 0 / 72., -4 / 72.
         offset = transforms.ScaledTranslation(dx, dy,
                                               self.figure.dpi_scale_trans)
-        shadow_transform = ax.transData + offset
+        shadow_transform = self.axes.transData + offset
 
         t = mtext.Text(xs.sum() / 2, ys.sum() / 2,
                        '{0} {1}'.format(length, units), transform=self.axes.transData + offset,
-                       horizontalalignment='center', verticalalignment='top', color='white')
-        t.set_path_effects([path_effects.withStroke(linewidth=3, foreground='black')])
+                       horizontalalignment='center', verticalalignment='top', **self.text_kwargs)
         t.axes = self.axes
         t.figure = self.figure
-
-        return lines + [t]
+        return t
 
 
 def determine_target_length(shortest, longest, allowed_n_ticks=(3, 4, 5)):
