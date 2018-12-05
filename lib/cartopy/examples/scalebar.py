@@ -5,6 +5,8 @@ Adaptive Scalebar
 Demonstrates cartopy's ability to draw scale bars that adapt their
 scale based on pan/zoom. 
 
+Note that because 
+
 """
 __tags__ = ["Miscellanea"]
 
@@ -17,19 +19,15 @@ def main():
     ax1 = plt.subplot(1, 2, 1, projection=ccrs.OSGB())
     ax1.stock_img()
     ax1.coastlines(resolution='10m')
-    a = ScaleBarArtist()
-    ax1.add_artist(a)
+    ax1.add_artist(ScaleBarArtist(location=(0.5, 0), width_range=(0.95, 0.99)))
 
     ax2 = plt.subplot(1, 2, 2, projection=ccrs.NorthPolarStereo())
     ax2.set_extent([-21, -95.5, 14, 76], ccrs.Geodetic())
     ax2.stock_img()
     ax2.coastlines(resolution='110m')
-    a = ScaleBarArtist()
-    a.set_zorder(100)
-    ax2.add_artist(a)
+    ax2.add_artist(ScaleBarArtist())
 
     a = ScaleBarArtist(location=(0.5, 0.95), line_kwargs={'color': 'pink'})
-    a.set_zorder(100)
     ax2.add_artist(a)
     #    scale_bar(ax, ccrs.Mercator(), 1000)  # 100 km scale bar
 
