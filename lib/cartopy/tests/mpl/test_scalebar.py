@@ -30,8 +30,7 @@ def test_simple_range():
 
 def test_float_range():
     r = determine_target_length(7, 8.9)
-    # TODO: Could be a better result?
-    assert r == [8.8, [0.0, 2.2, 4.4, 6.6, 8.8]]
+    assert r == [8.0, [0.0, 2.0, 4.0, 6.0, 8.0]]
 
 def test_small_domain():
     r = determine_target_length(8.1, 8.8)

@@ -35,21 +35,79 @@ def DEBUG(msg):
     pass
 
 
+def scale_for_units(units, value):
+    if units == 'miles':
+        value = value * 1609.34
+    elif units == 'meters':
+        value = value
+    else:
+        raise RuntimeError('unknown units')
+    return value
+
+#: The number of meters in the given unit.
+_UNIT_SCALEFACTOR = {'miles': 1609.34,
+                     'meters': 1,
+                     'killometers': 1000,
+                     'km': 1000,
+                     }
+_UNIT_ALIASES = {'miles': ['mi'],
+                 'meters': ['m'],
+                 'killometers': ['km']}
+
+_UNIT_SYMBOLS = {'miles': 'mi',
+                 'killometers': 'km',
+                 'meters': 'm'}
+
+class _Unit(object):
+    #: The number of meters in the given unit.
+    SCALEFACTORS = {'mi': 1609.34,
+                    'm': 1,
+                    'km': 1000,}
+    _UNITS_TO_ALIASES = {'km': ['killometers'],
+               'm': ['meters'],
+               'mi': ['miles']}
+    ALIASES = {alias: unit
+               for unit, aliases in _UNITS_TO_ALIASES.items()
+               for alias in aliases
+               }
+
+    # A really light-weight immutable unit interface.
+    def __init__(self, unit):
+        self.orig = unit
+        unit = self.ALIASES.get(unit, unit)
+        if unit not in self.SCALEFACTORS:
+            raise ValueError('Unknown unit {}'.format(unit))
+
+        self.unit = unit
+        self.scale_factor = self.SCALEFACTORS[unit]
+
+    def to_meters(self, values):
+        return values * self.scale_factor
+
+    def from_meters(self, values):
+        return values / self.scale_factor
+        
+    @property
+    def full_name(self):
+        return self._UNITS_TO_ALIASES.get(self.unit, [self.unit])[0]
+
+
 class ScaleBarArtist(matplotlib.artist.Artist):
-    def __init__(self, location=(0.5, 0.075), width_range=(0.15, 0.3),
-                 line_kwargs=None, border_kwargs=None, text_kwargs=None):
+    def __init__(self, location=(0.5, 0.075), max_width=0.3,
+                 line_kwargs=None, border_kwargs=None, text_kwargs=None, units='km'):
 
         #: The position of the scalebar in Axes coordinates.
         self.location = np.array(location)
 
-        #: The valid range of widths, in Axes coordinates, of the
-        #: scalebar.
-        self.width_range = width_range
+        #: The maximum width, in Axes coordinate, of the scalebar.
+        self.max_width = max_width
 
         self.line_kwargs = line_kwargs or dict()
         self.border_kwargs = border_kwargs or dict(color='black', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
         self.text_kwargs = text_kwargs or dict(color='white', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
         self.zorder = 50
+
+        self.units = _Unit(units)
 
         super(ScaleBarArtist, self).__init__()
 
@@ -73,39 +131,121 @@ class ScaleBarArtist(matplotlib.artist.Artist):
     def scalebar_artists(self, linewidth=3, units='km'):
         ax = self.axes
         ax_to_data = ax.transAxes - ax.transData
-        center = ax_to_data.transform_point(self.location)
-        p0 = self.location + [self.width_range[0] / 2, 0]
-        p1 = self.location + [self.width_range[1] / 2, 0]
-        w0 = (ax_to_data.transform_point(p0)[0] - center[0]) * 2
-        w1 = (ax_to_data.transform_point(p1)[0] - center[0]) * 2
-        line_gen = center_align_line_generator(center[0], center[1], w0, w1, self.axes.projection)
-        r = pick_best_scale_length(line_gen)
-        if r is None:
-            return []
-        line_start_stop = r[2]
-        xs = np.array([line_start_stop[0][0], line_start_stop[1][0]])
-        ys = np.array([line_start_stop[0][1], line_start_stop[1][1]])
 
-        steps = r[1]
-        start, extreme_end = line_start_stop[0], [line_start_stop[1][0] + 0.1 * (self.axes.projection.x_limits[1] - self.axes.projection.x_limits[0]), line_start_stop[1][1]]
-        lines = self.scale_lines(steps, start, line_start_stop, extreme_end)
+        alignment = 'center'
+
+        # if alignment == 'center':
+        center = ax_to_data.transform_point(self.location)
+        p0 = self.location - [self.max_width / 2, 0]
+        p1 = self.location + [self.max_width / 2, 0]
+        # elif alignment ...
+
+        p0 = ax_to_data.transform_point(p0)
+        p1 = ax_to_data.transform_point(p1)
+
+        # Calculate maximum line length in meters on the ground (MOG).
+        npts = 40
+        def line_length(start_point, end_point):
+            xs = np.linspace(start_point[0], end_point[0], npts)
+            ys = np.linspace(start_point[1], end_point[1], npts)
+            points_ll = ccrs.Geodetic().transform_points(self.axes.projection, xs, ys)[:, :2].T
+            return line_len(points_ll)
+
+        max_line_length_m = line_length(p0, p1)
+        max_line_length = self.units.from_meters(max_line_length_m) 
+
+        self.locator = matplotlib.ticker.MaxNLocator(4)
+
+        # Compute the tick marks.
+        ticks = self.locator.tick_values(0, max_line_length)
+
+        # Only allow ticks that are within the allowed range.
+        ticks = ticks[np.logical_and(ticks >= 0, ticks <= max_line_length)]
+
+        ticks_m = self.units.to_meters(ticks)
+
+        # The scalebar length is now the maximum tick value.
+        scalebar_len = ticks.max()
+
+        scalebar_len_m = ticks_m.max()
+
+        # We now know what ticks we are going to draw, but we need to figure
+        # out where these locations are in projected space. For center alignment
+        # things get tricky because we can't guarantee that the length-scale on
+        # the RHS of a center point is the same as the length-scale on the LHS, so we iterate a little.
+
+        if alignment == 'center':
+            # Iterate the center point until we get a good approximation for a balanced start point
+
+            # Start by assuming that the start of the colorbar should be placed at p0.
+            # Compute the center location based on that assumption. Now iteratively move the start
+            # location closer to the desired center based on whether the projected end is 
+            min_start = p0
+            max_start = forward(self.axes.projection, p1, p0, distance=scalebar_len_m)
+
+            # Compute the start value.
+            start = (min_start[0] + max_start[0]) / 2, (min_start[1] + max_start[1]) / 2
+
+            start_range = max([line_length(start, min_start), line_length(start, max_start)])
+            # line_length(max_start, min_start)
+
+            def center_dist(start):
+                end = forward(self.axes.projection, start, p1, distance=scalebar_len_m)
+                new_center = (start[0] + end[0]) / 2, (start[1] + end[1]) / 2
+                return line_length(new_center, center)
+
+            target = scalebar_len_m / 1e6
+
+            for i in range(50):
+                distance_adjustment = start_range / 2**(i)
+
+                distance_adjustment = center_dist(start)
+
+                if distance_adjustment < target:
+                    break
+
+                # Move the start by the given distance adjustment. Choose the direction that reduces the distance from the desired center.
+                choice0 = forward(self.axes.projection, start, p0, distance=distance_adjustment)
+                choice1 = forward(self.axes.projection, start, p1, distance=distance_adjustment)
+
+                if center_dist(choice0) < center_dist(choice1):
+                    start = choice0
+                else:
+                    start = choice1
+
+            lines, outline = self.scale_lines(ticks_m, start, p1)
+            xs, ys = outline
+            xs = np.array(xs)
+            ys = np.array(ys)
+
+        elif alignment == 'start':
+            start = p0
+            lines, outline = self.scale_lines(ticks_m, p0, p1)
+            xs, ys = outline
+            xs = np.array(xs)
+            ys = np.array(ys)
 
         outline = self.bar_outline(xs, ys)
         if outline:
             lines.insert(0, outline)
 
-        t = self.scale_text(xs, ys, r[0])
+        t = self.scale_text(xs, ys, scalebar_len)
         if t:
             lines.append(t)
 
         return lines
 
-    def scale_lines(self, steps, start, line_start_stop, extreme_end):
+    def scale_lines(self, steps, start, extreme_end):
         lines = []
         line_start = start
+
+        x = [start[0]]
+        y = [start[1]]
         for i, distance in enumerate(np.diff(steps)):
             line_end = forward(self.axes.projection, line_start, extreme_end, distance)
 
+            x.append(line_end[0])
+            y.append(line_end[1])
             line_style = self.line_stylization(i, steps)
             #import cartopy.mpl.style as cms
             #style = cms.merge(line_style, self.line_kwargs)
@@ -113,8 +253,8 @@ class ScaleBarArtist(matplotlib.artist.Artist):
             line_style.update(self.line_kwargs)
             style = line_style
 
-            xs = np.array([line_start_stop[0][0], line_start_stop[1][0]])
-            ys = np.array([line_start_stop[0][1], line_start_stop[1][1]])
+            xs = np.array([start[0], extreme_end[0]])
+            ys = np.array([start[1], extreme_end[1]])
             line = mlines.Line2D(
                 [line_start[0], line_end[0]], [line_start[1], line_end[1]],
                 transform=self.axes.transData, **style)
@@ -122,7 +262,8 @@ class ScaleBarArtist(matplotlib.artist.Artist):
             lines.append(line)
 
             line_start = line_end
-        return lines
+        return lines, [x, y]
+
     def bar_outline(self, xs, ys):
         # Put a nice border around the scalebar.
         border = mlines.Line2D(
@@ -132,10 +273,10 @@ class ScaleBarArtist(matplotlib.artist.Artist):
 
     def scale_text(self, xs, ys, bar_length):
         length = bar_length
-        units = 'm'
-        if length > 1000 and units == 'm':
-            length /= 1000
-            units = 'km'
+        units = self.units.orig
+
+        if length.is_integer():
+            length = int(length)
 
         import matplotlib.transforms as transforms
         # shift the object down 4 points
@@ -144,7 +285,7 @@ class ScaleBarArtist(matplotlib.artist.Artist):
                                               self.figure.dpi_scale_trans)
         shadow_transform = self.axes.transData + offset
 
-        t = mtext.Text(xs.sum() / 2, ys.sum() / 2,
+        t = mtext.Text(xs.mean(), ys.mean(),
                        '{0} {1}'.format(length, units), transform=self.axes.transData + offset,
                        horizontalalignment='center', verticalalignment='top', **self.text_kwargs)
         t.axes = self.axes
@@ -152,100 +293,54 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         return t
 
 
-def determine_target_length(shortest, longest, allowed_n_ticks=(3, 4, 5)):
-    """
-    Given a range of lengths, choose a nice length to aim for and the ticks that we would choose.
 
-    >>> determine_target_length(7, 9)
-    [9.0, [0.0, 3.0, 6.0, 9.0]]
-    >>> determine_target_length(7, 8.9)
-    [8.8, [0.0, 2.2, 4.4, 6.6, 8.8]]
-    >>> determine_target_length(8.1, 8.8)
-    [8.8, [0.0, 2.2, 4.4, 6.6, 8.8]]
-    >>> determine_target_length(101, 151)
-    [150.0, [0.0, 50.0, 100.0, 150.0]]
+class ScaleLineArtist(ScaleBarArtist):
+    def scale_lines(self, steps, start, extreme_end):
+        lines = []
+        line_start = start
 
-    """
-    if longest <= shortest:
-        raise ValueError('shortest length must be shorter than longest.')
+        x = [start[0]]
+        y = [start[1]]
+        marker_locs = [start]
 
-    n_digits = np.floor(np.log10(longest - shortest))
+        for i, distance in enumerate(np.diff(steps)):
+            line_end = forward(self.axes.projection, line_start, extreme_end, distance)
 
-    # The scale needed to bring the range down to [1-10) range.
-    range_scale = 10 ** (n_digits - 1)
+            marker_locs.append(line_end)
 
-    # Scale the input values.
-    longest = longest / range_scale
-    shortest = shortest / range_scale
+            x.append(line_end[0])
+            y.append(line_end[1])
+            line_style = self.line_stylization(i, steps)
+            #import cartopy.mpl.style as cms
+            #style = cms.merge(line_style, self.line_kwargs)
+            # Don't use cms.merge here because that assumed PathCollections, not lines.
+            line_style.update(self.line_kwargs)
+            style = line_style
 
-    candidates = []
-    for n_ticks_target in allowed_n_ticks:
-        step = (longest / 10) // n_ticks_target * 10
-        step = longest // n_ticks_target
-        scale_step = step * range_scale
-        resulting_length = step * n_ticks_target
-        if resulting_length > shortest:
-            # Round to the 5 dp after the appropriate scale factor.
-            candidates.append(
-                [resulting_length * range_scale,
-                 list(np.around(np.arange(0, resulting_length * range_scale + scale_step/2, scale_step), decimals=-int(n_digits) + 5)),
-                 longest - resulting_length])
-    if not candidates:
-        raise ValueError(
-            'Cannot select a sensible step size. Please raise an '
-            'issue with details of the range (shortest={}, longest={}).'
-            ''.format(shortest, longest))
-    distance = lambda candidate: candidate[2]
-    best = min(candidates, key=distance)
+            xs = np.array([start[0], extreme_end[0]])
+            ys = np.array([start[1], extreme_end[1]])
+            height = 1000
+            style = {'marker': '|', 'markersize': 10, 'markeredgewidth': 1, 'color': 'black', 'linestyle': 'solid'}
+            line = mlines.Line2D(
+                [line_end[0], line_end[0]], [line_end[1] - height, line_end[1] + height],
+                transform=self.axes.transData, **style)
+            line.axes = self.axes
 
-    return best[:2]
+            lines.append(line)
 
+            line_start = line_end
 
-def center_align_line_generator(x_center, y, min_x_width, max_x_width, projection):
-    """
-    This implementation's strategy is to align the line center, taking equal parts off the line on both sides.
+        xs, ys = zip(*marker_locs)
+        line = mlines.Line2D(xs, ys, transform=self.axes.transData, **style)
+        lines = [line]
 
-#    >>> import cartopy.crs as ccrs
-#    >>> gen = center_align_line_generator(0, 0, 30000, 40000, ccrs.Mercator())
-##    >>> next(gen)
-#    >>> next(gen)
-#    >>> next(gen)
+        return lines, [x, y]
 
-    """
-    # Infinite generator of lines, doing a binary search for some external
-    # criteria (e.g. as done in pick_best_scale_length)
+    def line_stylization(self, step_index, steps):
+        return {'color': 'black'}
 
-    lon_lat = ccrs.Geodetic()
-    steps = 4
-
-    ys = np.full(steps, y)
-    min_xs = np.linspace(-0.5, 0.5, steps) * min_x_width + x_center
-    line_lon_lat = lon_lat.transform_points(projection, min_xs, ys).T[:2]
-    yield [[min_xs.min(), y], [min_xs.max(), y]], line_lon_lat
-
-    max_xs = np.linspace(-0.5, 0.5, steps) * max_x_width + x_center
-    line_lon_lat = lon_lat.transform_points(projection, max_xs, ys).T[:2]
-    yield [[max_xs.min(), y], [max_xs.max(), y]], line_lon_lat
-
-    search_space = [min_x_width, max_x_width]
-
-    while True:
-        DEBUG('Search space: {}'.format(search_space))
-        # Split the search space in half.
-        next_split = (search_space[1] - search_space[0]) / 2 + search_space[0]
-
-        xs = np.linspace(-0.5, 0.5, steps) * next_split + x_center
-        line_lon_lat = lon_lat.transform_points(projection, xs, ys).T[:2]
-        left_is_good = yield ([[xs.min(), y], [xs.max(), y]], line_lon_lat)
-
-        if left_is_good:
-            DEBUG('Bring in the rhs')
-            yield 'OK'
-            search_space[1] = next_split
-        else:
-            DEBUG('Bring in the lhs')
-            yield 'OK'
-            search_space[0] = next_split
+    def bar_outline(self, *args, **kwargs):
+        return None
 
 
 def line_len(line):
@@ -253,62 +348,21 @@ def line_len(line):
     Determine the physical line length. The units are determined by this function.
 
     Line is in lons/lats
+
+
+    >>> line_len(np.array([[0, 1], [1, 0]))
+    123
+
     """
     import cartopy.geodesic
     geod = cartopy.geodesic.Geodesic()
     return geod.geometry_length(line.T)
 
 
-
-def pick_best_scale_length(line_gen):
-    """
-    Given the possible Axes coordinates that could be used to represent a scalebar,
-    return the best choice and its length (rounded to a nice form).
-
-    Can return None if there is no possible scale for the given line. This occurs when
-    the line would be out of range of projection.
-
-    """
-    # Get the extreme lengths (first 2 lines)
-    # This will give us the range of lines that are available to us.
-    # Pick the line that we will ultimately go for.
-    # Iterate until we get close to that line.
-
-    _, shortest_line = next(line_gen)
-    _, longest_line = next(line_gen)
-
-    if np.isnan(line_len(longest_line)) or np.isnan(line_len(shortest_line)):
-        return None
-    target_length, step = determine_target_length(
-        line_len(shortest_line), line_len(longest_line)
-    )
-
-    DEBUG('Target: {}; lhs: {}; rhs: {};'.format(target_length, line_len(shortest_line), line_len(longest_line)))
-    for iteration, r in enumerate(line_gen):
-        # Avoid infinite loops
-        if iteration > 50:
-            raise RuntimeError('Unable to determine a sensible length. Target: {}; now: {};'.format(target_length, length))
-        line_start_stop, line = r
-        length = line_len(line)
-        DEBUG('Target: {}; now: {};'.format(target_length, length))
-        if length < target_length:
-            line_gen.send(False)
-            lh_len = length
-        else:
-            line_gen.send(True)
-            rh_len = length
-        # Iterate until we have an accuracy of 6 significant figures.
-        if np.abs(length - target_length) / target_length < 0.000001:
-            break
-
-    # TODO: Remove the line itself?
-    return target_length, step, line_start_stop, line
-
-
 def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, npts=20, maxcount=100):
     """
     Return the end point of a straight line in the given projection, starting from
-    start_point and extending in the x direction until the line has the given distance.
+    start_point and extending in the extreme_end_point direction until the line has the given distance.
 
     This is an iterative solution which will terminate once the length reaches ``(abs(len - target) / target) < tol``.
     """
@@ -324,7 +378,7 @@ def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, 
     if max_len < distance:
         raise ValueError(
             'It is not possible to construct a straight line '
-            'of length {} from {} in the x direction of this projection.'
+            'of length {} from {} in the extreme_end_point direction of this projection.'
             ''.format(distance, start_point))
     # Binary search of this line to get to the desired tolerance.
     current_length = max_len

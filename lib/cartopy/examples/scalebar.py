@@ -12,14 +12,19 @@ __tags__ = ["Miscellanea"]
 
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
-from cartopy.mpl.scalebar import ScaleBarArtist
+from cartopy.mpl.scalebar import ScaleBarArtist, ScaleLineArtist
 
 
 def main():
     ax1 = plt.subplot(1, 2, 1, projection=ccrs.OSGB())
     ax1.stock_img()
     ax1.coastlines(resolution='10m')
-    ax1.add_artist(ScaleBarArtist(location=(0.5, 0), width_range=(0.95, 0.99)))
+    ax1.add_artist(ScaleBarArtist(location=(0.5, -0.05), max_width=1))
+
+    ax1.add_artist(ScaleBarArtist(location=(0.5, 0.05), max_width=1, units='miles'))
+    ax1.add_artist(ScaleLineArtist(location=(0.5, 0.5), max_width=1))
+    # TODO: Support this (or at least allow use of Affine2D transform to do it manually.
+#    ax1.add_artist(ScaleBarArtist(location=(0.95, 0.5), max_width=1, rotation=90))
 
     ax2 = plt.subplot(1, 2, 2, projection=ccrs.NorthPolarStereo())
     ax2.set_extent([-21, -95.5, 14, 76], ccrs.Geodetic())
