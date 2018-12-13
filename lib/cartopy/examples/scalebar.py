@@ -22,7 +22,9 @@ def main():
     ax1.add_artist(ScaleBarArtist(location=(0.5, -0.05), max_width=1))
 
     ax1.add_artist(ScaleBarArtist(location=(0.5, 0.05), max_width=1, units='miles'))
-    ax1.add_artist(ScaleLineArtist(location=(0.5, 0.5), max_width=1))
+
+    ax1.add_artist(ScaleLineArtist(location=(0.1, 0.5), max_width=0.8, alignment='left'))
+    ax1.add_artist(ScaleLineArtist(location=(0.1, 0.5), max_width=0.8, tick_text_y_offset=6, units='miles', alignment='left'))
     # TODO: Support this (or at least allow use of Affine2D transform to do it manually.
 #    ax1.add_artist(ScaleBarArtist(location=(0.95, 0.5), max_width=1, rotation=90))
 

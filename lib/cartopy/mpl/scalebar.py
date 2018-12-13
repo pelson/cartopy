@@ -35,15 +35,6 @@ def DEBUG(msg):
     pass
 
 
-def scale_for_units(units, value):
-    if units == 'miles':
-        value = value * 1609.34
-    elif units == 'meters':
-        value = value
-    else:
-        raise RuntimeError('unknown units')
-    return value
-
 #: The number of meters in the given unit.
 _UNIT_SCALEFACTOR = {'miles': 1609.34,
                      'meters': 1,
@@ -92,9 +83,23 @@ class _Unit(object):
         return self._UNITS_TO_ALIASES.get(self.unit, [self.unit])[0]
 
 
+import sys,math
+
+def round_sig_fig(number, sig_figs=7):
+    y = abs(number)
+
+    # If it is nearly zero, return zero.
+    if y <= sys.float_info.min:
+        result = 0.0
+    else:
+        result = round(number, int(sig_figs - math.ceil(math.log10(y)) ) )
+    return result
+
+
 class ScaleBarArtist(matplotlib.artist.Artist):
     def __init__(self, location=(0.5, 0.075), max_width=0.3,
-                 line_kwargs=None, border_kwargs=None, text_kwargs=None, units='km'):
+                 line_kwargs=None, border_kwargs=None, text_kwargs=None, units='km',
+                 tick_text_y_offset=-6, alignment='center'):
 
         #: The position of the scalebar in Axes coordinates.
         self.location = np.array(location)
@@ -106,6 +111,11 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         self.border_kwargs = border_kwargs or dict(color='black', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
         self.text_kwargs = text_kwargs or dict(color='white', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
         self.zorder = 50
+
+        #: The offset of the tick text. If None, no tick text to be drawn.
+        #: If negative, text is below the ticks. If positive, above.
+        self.tick_text_y_offset = tick_text_y_offset
+        self.alignment = alignment
 
         self.units = _Unit(units)
 
@@ -132,13 +142,15 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         ax = self.axes
         ax_to_data = ax.transAxes - ax.transData
 
-        alignment = 'center'
-
-        # if alignment == 'center':
-        center = ax_to_data.transform_point(self.location)
-        p0 = self.location - [self.max_width / 2, 0]
-        p1 = self.location + [self.max_width / 2, 0]
-        # elif alignment ...
+        if self.alignment == 'center':
+            center = ax_to_data.transform_point(self.location)
+            p0 = self.location - [self.max_width / 2, 0]
+            p1 = self.location + [self.max_width / 2, 0]
+        elif self.alignment == 'left':
+            p0 = self.location
+            p1 = p0 + [self.max_width, 0]
+        else:
+            raise ValueError('Unknown alignment {}'.format(self.alignment))
 
         p0 = ax_to_data.transform_point(p0)
         p1 = ax_to_data.transform_point(p1)
@@ -174,7 +186,7 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         # things get tricky because we can't guarantee that the length-scale on
         # the RHS of a center point is the same as the length-scale on the LHS, so we iterate a little.
 
-        if alignment == 'center':
+        if self.alignment == 'center':
             # Iterate the center point until we get a good approximation for a balanced start point
 
             # Start by assuming that the start of the colorbar should be placed at p0.
@@ -213,17 +225,13 @@ class ScaleBarArtist(matplotlib.artist.Artist):
                 else:
                     start = choice1
 
-            lines, outline = self.scale_lines(ticks_m, start, p1)
-            xs, ys = outline
-            xs = np.array(xs)
-            ys = np.array(ys)
-
-        elif alignment == 'start':
+        elif self.alignment == 'left':
             start = p0
-            lines, outline = self.scale_lines(ticks_m, p0, p1)
-            xs, ys = outline
-            xs = np.array(xs)
-            ys = np.array(ys)
+
+        lines, outline = self.scale_lines(ticks_m, start, p1)
+        xs, ys = outline
+        xs = np.array(xs)
+        ys = np.array(ys)
 
         outline = self.bar_outline(xs, ys)
         if outline:
@@ -275,23 +283,34 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         length = bar_length
         units = self.units.orig
 
+        # 7 significant figures is enough precision for everything.
+        length = round_sig_fig(length, 7)
+
         if length.is_integer():
             length = int(length)
 
+        # shift the object down 6 points
+        offset = self.tick_text_y_offset
+
+        if offset is None:
+            return
+        if offset > 0:
+            verticalalignment = 'bottom'
+        else:
+            verticalalignment = 'top'
+        dx, dy = 0, offset / 72.
+
         import matplotlib.transforms as transforms
-        # shift the object down 4 points
-        dx, dy = 0 / 72., -4 / 72.
         offset = transforms.ScaledTranslation(dx, dy,
                                               self.figure.dpi_scale_trans)
         shadow_transform = self.axes.transData + offset
 
         t = mtext.Text(xs.mean(), ys.mean(),
                        '{0} {1}'.format(length, units), transform=self.axes.transData + offset,
-                       horizontalalignment='center', verticalalignment='top', **self.text_kwargs)
+                       horizontalalignment='center', verticalalignment=verticalalignment, **self.text_kwargs)
         t.axes = self.axes
         t.figure = self.figure
         return t
-
 
 
 class ScaleLineArtist(ScaleBarArtist):
@@ -302,37 +321,34 @@ class ScaleLineArtist(ScaleBarArtist):
         x = [start[0]]
         y = [start[1]]
         marker_locs = [start]
+        style = self.line_kwargs
+        style = {'marker': '|', 'markersize': abs(self.tick_text_y_offset or 5) - 2, 'markeredgewidth': 1, 'color': 'black', 'linestyle': 'solid'}
+
+        style.update(dict(solid_capstyle='butt'))
+
+        offset = self.tick_text_y_offset
+
+        if offset is None:
+            return
+        import matplotlib.markers
+        if offset > 0:
+            verticalalignment = 'bottom'
+            style['marker'] = matplotlib.markers.TICKUP
+        else:
+            verticalalignment = 'top'
+            style['marker'] = matplotlib.markers.TICKDOWN
+        dx, dy = 0, offset / 72.
 
         for i, distance in enumerate(np.diff(steps)):
             line_end = forward(self.axes.projection, line_start, extreme_end, distance)
-
             marker_locs.append(line_end)
-
-            x.append(line_end[0])
-            y.append(line_end[1])
-            line_style = self.line_stylization(i, steps)
-            #import cartopy.mpl.style as cms
-            #style = cms.merge(line_style, self.line_kwargs)
-            # Don't use cms.merge here because that assumed PathCollections, not lines.
-            line_style.update(self.line_kwargs)
-            style = line_style
-
-            xs = np.array([start[0], extreme_end[0]])
-            ys = np.array([start[1], extreme_end[1]])
-            height = 1000
-            style = {'marker': '|', 'markersize': 10, 'markeredgewidth': 1, 'color': 'black', 'linestyle': 'solid'}
-            line = mlines.Line2D(
-                [line_end[0], line_end[0]], [line_end[1] - height, line_end[1] + height],
-                transform=self.axes.transData, **style)
-            line.axes = self.axes
-
-            lines.append(line)
-
             line_start = line_end
 
         xs, ys = zip(*marker_locs)
         line = mlines.Line2D(xs, ys, transform=self.axes.transData, **style)
         lines = [line]
+
+        lines.extend(self.tick_texts(xs, ys, steps))
 
         return lines, [x, y]
 
@@ -341,6 +357,50 @@ class ScaleLineArtist(ScaleBarArtist):
 
     def bar_outline(self, *args, **kwargs):
         return None
+
+    def scale_text(self, xs, ys, bar_length):
+        return None
+
+    def tick_texts(self, xs, ys, ticks):
+        units = self.units.orig
+        texts = []
+        for x, y, tick in zip(xs, ys, ticks):
+            length = tick
+
+            length = self.units.from_meters(length)
+
+            # 7 significant figures is enough precision for everything.
+            length = round_sig_fig(length, 7)
+
+            if length.is_integer():
+                length = int(length)
+
+#            if length == 0:
+#                continue
+            import matplotlib.transforms as transforms
+            # shift the object down 6 points
+            offset = self.tick_text_y_offset
+
+            if offset is None:
+                return
+            if offset > 0:
+                verticalalignment = 'bottom'
+            else:
+                verticalalignment = 'top'
+            dx, dy = 0, offset / 72.
+            offset = transforms.ScaledTranslation(dx, dy,
+                                                  self.figure.dpi_scale_trans)
+            shadow_transform = self.axes.transData + offset
+            t = mtext.Text(x, y,
+                           '{0}'.format(length, units), transform=self.axes.transData + offset,
+                           horizontalalignment='center', verticalalignment=verticalalignment, **self.text_kwargs)
+            t.axes = self.axes
+            t.figure = self.figure
+            texts.append(t)
+        # Only show the units on the last text. (and ensure the number is center aligned)
+        t.set_text('{2} {0} {1}'.format(length, units, ' ' * len(str(units) + ' ')))
+        
+        return texts
 
 
 def line_len(line):
