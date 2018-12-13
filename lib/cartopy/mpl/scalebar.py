@@ -30,25 +30,6 @@ import matplotlib.text as mtext
 import matplotlib.patheffects as path_effects
 
 
-def DEBUG(msg):
-    #print(msg)
-    pass
-
-
-#: The number of meters in the given unit.
-_UNIT_SCALEFACTOR = {'miles': 1609.34,
-                     'meters': 1,
-                     'killometers': 1000,
-                     'km': 1000,
-                     }
-_UNIT_ALIASES = {'miles': ['mi'],
-                 'meters': ['m'],
-                 'killometers': ['km']}
-
-_UNIT_SYMBOLS = {'miles': 'mi',
-                 'killometers': 'km',
-                 'meters': 'm'}
-
 class _Unit(object):
     #: The number of meters in the given unit.
     SCALEFACTORS = {'mi': 1609.34,
@@ -57,6 +38,8 @@ class _Unit(object):
     _UNITS_TO_ALIASES = {'km': ['killometers'],
                'm': ['meters'],
                'mi': ['miles']}
+
+    #: A mapping of unit_alias to canonical_unit_name.
     ALIASES = {alias: unit
                for unit, aliases in _UNITS_TO_ALIASES.items()
                for alias in aliases
@@ -96,7 +79,7 @@ def round_sig_fig(number, sig_figs=7):
     return result
 
 
-class ScaleBarArtist(matplotlib.artist.Artist):
+class _GenericScaleBarArtist(matplotlib.artist.Artist):
     def __init__(self, location=(0.5, 0.075), max_width=0.3,
                  line_kwargs=None, border_kwargs=None, text_kwargs=None, units='km',
                  tick_text_y_offset=-6, alignment='center'):
@@ -119,26 +102,35 @@ class ScaleBarArtist(matplotlib.artist.Artist):
 
         self.units = _Unit(units)
 
-        super(ScaleBarArtist, self).__init__()
+        #: The matplotlib locator responsible for finding the scalebar ticks.
+        self.tick_locator = matplotlib.ticker.MaxNLocator(4)
 
-    def line_stylization(self, step_index, steps):
-        """
-        Given the step we are to draw, and a list of all
-        other steps that are going to be drawn, return a
-        style dictionary that can be merged with self.line_kwargs.
-        """
-        if step_index % 2:
-            return {'color': 'white'}
-        else:
-            return {'color': 'black'}
+        #: The ticks that are used for the scalebar (computed)
+        #: in the desired units.
+        self._ticks = tuple()
 
+        #: The x and y locations of the ticks (computed)
+        #: in the projected coordinate system.
+        self._marker_locations = tuple()
+
+        #: The total of this scalebar (computed) in
+        #: the desired units.
+        self._scalebar_length = 0.0
+
+        super(_GenericScaleBarArtist, self).__init__()
+    
     def draw(self, renderer, *args, **kwargs):
         if not self.get_visible():
             return
         for artist in self.scalebar_artists():
             artist.draw(renderer)
 
-    def scalebar_artists(self, linewidth=3, units='km'):
+    def update_scalebar_properties(self):
+        """
+        Compute and update the properties that will be required to
+        subsequently construct scalebar artists.
+
+        """
         ax = self.axes
         ax_to_data = ax.transAxes - ax.transData
 
@@ -146,12 +138,14 @@ class ScaleBarArtist(matplotlib.artist.Artist):
             center = ax_to_data.transform_point(self.location)
             p0 = self.location - [self.max_width / 2, 0]
             p1 = self.location + [self.max_width / 2, 0]
-        elif self.alignment == 'left':
+        elif self.alignment in 'left':
             p0 = self.location
             p1 = p0 + [self.max_width, 0]
+        elif self.alignment == 'right':
+            p1 = self.location
+            p0 = p1 - [self.max_width, 0]
         else:
             raise ValueError('Unknown alignment {}'.format(self.alignment))
-
         p0 = ax_to_data.transform_point(p0)
         p1 = ax_to_data.transform_point(p1)
 
@@ -166,18 +160,18 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         max_line_length_m = line_length(p0, p1)
         max_line_length = self.units.from_meters(max_line_length_m) 
 
-        self.locator = matplotlib.ticker.MaxNLocator(4)
-
         # Compute the tick marks.
-        ticks = self.locator.tick_values(0, max_line_length)
+        ticks = self.tick_locator.tick_values(0, max_line_length)
 
         # Only allow ticks that are within the allowed range.
         ticks = ticks[np.logical_and(ticks >= 0, ticks <= max_line_length)]
+        self._ticks = ticks
 
         ticks_m = self.units.to_meters(ticks)
 
         # The scalebar length is now the maximum tick value.
         scalebar_len = ticks.max()
+        self._scalebar_length = scalebar_len
 
         scalebar_len_m = ticks_m.max()
 
@@ -227,50 +221,54 @@ class ScaleBarArtist(matplotlib.artist.Artist):
 
         elif self.alignment == 'left':
             start = p0
+        elif self.alignment == 'right':
+            start = p1
+            p1 = p0
 
-        lines, outline = self.scale_lines(ticks_m, start, p1)
-        xs, ys = outline
-        xs = np.array(xs)
-        ys = np.array(ys)
+        line_start = start
+        marker_locs = [line_start]
+        for i, distance in enumerate(np.diff(self._ticks)):
+            distance_m = self.units.to_meters(distance)
+            line_end = forward(self.axes.projection, line_start, p1, distance_m)
+            marker_locs.append(line_end)
+            line_start = line_end
+
+        self._marker_locations = tuple(marker_locs)
+
+    def scalebar_artists(self, linewidth=3, units='km'):
+        self.update_scalebar_properties()
+
+        artists = []
+
+        ticks_m = self.units.to_meters(self._ticks)
+        start = self._marker_locations[0]
+        p1 = self._marker_locations[1]
+
+        xs, ys = zip(*self._marker_locations)
 
         outline = self.bar_outline(xs, ys)
         if outline:
-            lines.insert(0, outline)
+            artists.append(outline)
 
-        t = self.scale_text(xs, ys, scalebar_len)
+        lines = self.scale_lines(ticks_m, start, p1)
+        if lines:
+            artists.extend(lines)
+
+        texts = self.tick_texts()
+        if texts:
+            artists.extend(texts)
+
+        t = self.scale_text(xs, ys, self._scalebar_length)
         if t:
-            lines.append(t)
+            artists.append(t)
 
-        return lines
+        return artists
 
     def scale_lines(self, steps, start, extreme_end):
-        lines = []
-        line_start = start
+        return None
 
-        x = [start[0]]
-        y = [start[1]]
-        for i, distance in enumerate(np.diff(steps)):
-            line_end = forward(self.axes.projection, line_start, extreme_end, distance)
-
-            x.append(line_end[0])
-            y.append(line_end[1])
-            line_style = self.line_stylization(i, steps)
-            #import cartopy.mpl.style as cms
-            #style = cms.merge(line_style, self.line_kwargs)
-            # Don't use cms.merge here because that assumed PathCollections, not lines.
-            line_style.update(self.line_kwargs)
-            style = line_style
-
-            xs = np.array([start[0], extreme_end[0]])
-            ys = np.array([start[1], extreme_end[1]])
-            line = mlines.Line2D(
-                [line_start[0], line_end[0]], [line_start[1], line_end[1]],
-                transform=self.axes.transData, **style)
-            line.axes = self.axes
-            lines.append(line)
-
-            line_start = line_end
-        return lines, [x, y]
+    def tick_texts(self):
+        return None
 
     def bar_outline(self, xs, ys):
         # Put a nice border around the scalebar.
@@ -282,6 +280,10 @@ class ScaleBarArtist(matplotlib.artist.Artist):
     def scale_text(self, xs, ys, bar_length):
         length = bar_length
         units = self.units.orig
+
+        xs, ys = zip(*self._marker_locations)
+        xs = np.array(xs)
+        ys = np.array(ys)
 
         # 7 significant figures is enough precision for everything.
         length = round_sig_fig(length, 7)
@@ -312,56 +314,11 @@ class ScaleBarArtist(matplotlib.artist.Artist):
         t.figure = self.figure
         return t
 
+    def tick_texts(self):
+        xs, ys = zip(*self._marker_locations)
+        ticks = self._ticks
+        ticks = self.units.to_meters(ticks)
 
-class ScaleLineArtist(ScaleBarArtist):
-    def scale_lines(self, steps, start, extreme_end):
-        lines = []
-        line_start = start
-
-        x = [start[0]]
-        y = [start[1]]
-        marker_locs = [start]
-        style = self.line_kwargs
-        style = {'marker': '|', 'markersize': abs(self.tick_text_y_offset or 5) - 2, 'markeredgewidth': 1, 'color': 'black', 'linestyle': 'solid'}
-
-        style.update(dict(solid_capstyle='butt'))
-
-        offset = self.tick_text_y_offset
-
-        if offset is None:
-            return
-        import matplotlib.markers
-        if offset > 0:
-            verticalalignment = 'bottom'
-            style['marker'] = matplotlib.markers.TICKUP
-        else:
-            verticalalignment = 'top'
-            style['marker'] = matplotlib.markers.TICKDOWN
-        dx, dy = 0, offset / 72.
-
-        for i, distance in enumerate(np.diff(steps)):
-            line_end = forward(self.axes.projection, line_start, extreme_end, distance)
-            marker_locs.append(line_end)
-            line_start = line_end
-
-        xs, ys = zip(*marker_locs)
-        line = mlines.Line2D(xs, ys, transform=self.axes.transData, **style)
-        lines = [line]
-
-        lines.extend(self.tick_texts(xs, ys, steps))
-
-        return lines, [x, y]
-
-    def line_stylization(self, step_index, steps):
-        return {'color': 'black'}
-
-    def bar_outline(self, *args, **kwargs):
-        return None
-
-    def scale_text(self, xs, ys, bar_length):
-        return None
-
-    def tick_texts(self, xs, ys, ticks):
         units = self.units.orig
         texts = []
         for x, y, tick in zip(xs, ys, ticks):
@@ -401,6 +358,86 @@ class ScaleLineArtist(ScaleBarArtist):
         t.set_text('{2} {0} {1}'.format(length, units, ' ' * len(str(units) + ' ')))
         
         return texts
+
+
+class ScaleBarArtist(_GenericScaleBarArtist):
+    def line_stylization(self, step_index, steps):
+        """
+        Given the step we are to draw, and a list of all
+        other steps that are going to be drawn, return a
+        style dictionary that can be merged with self.line_kwargs.
+        """
+        if step_index % 2:
+            return {'color': 'white'}
+        else:
+            return {'color': 'black'}
+
+    def scale_lines(self, steps, start, extreme_end):
+        lines = []
+        line_start = start
+
+        for i, distance in enumerate(np.diff(steps)):
+            line_style = self.line_stylization(i, steps)
+            #import cartopy.mpl.style as cms
+            #style = cms.merge(line_style, self.line_kwargs)
+            # Don't use cms.merge here because that assumed PathCollections, not lines.
+            line_style.update(self.line_kwargs)
+            style = line_style
+
+            line = [self._marker_locations[i], self._marker_locations[i+1]]
+            xs, ys = zip(*line)
+            line = mlines.Line2D(
+                xs, ys,
+                transform=self.axes.transData, **style)
+            line.axes = self.axes
+            lines.append(line)
+        return lines
+
+    def tick_texts(self):
+        return None
+
+
+class ScaleLineArtist(_GenericScaleBarArtist):
+    def scale_lines(self, steps, start, extreme_end):
+        lines = []
+        line_start = start
+
+        x = [start[0]]
+        y = [start[1]]
+        marker_locs = [start]
+        style = self.line_kwargs
+        style = {'marker': '|', 'markersize': abs(self.tick_text_y_offset or 5) - 2, 'markeredgewidth': 1, 'color': 'black', 'linestyle': 'solid'}
+
+        style.update(dict(solid_capstyle='butt'))
+
+        offset = self.tick_text_y_offset
+
+        if offset is None:
+            return
+        import matplotlib.markers
+        if offset > 0:
+            verticalalignment = 'bottom'
+            style['marker'] = matplotlib.markers.TICKUP
+        else:
+            verticalalignment = 'top'
+            style['marker'] = matplotlib.markers.TICKDOWN
+        dx, dy = 0, offset / 72.
+
+        xs, ys = zip(*self._marker_locations)
+        line = mlines.Line2D(xs, ys, transform=self.axes.transData, **style)
+        lines = [line]
+
+        return lines
+
+    def line_stylization(self, step_index, steps):
+        return {'color': 'black'}
+
+    def bar_outline(self, *args, **kwargs):
+        return None
+
+    def scale_text(self, xs, ys, bar_length):
+        return None
+
 
 
 def line_len(line):
