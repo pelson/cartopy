@@ -32,7 +32,7 @@ def main():
     ax2.set_extent([-21, -95.5, 14, 76], ccrs.Geodetic())
     ax2.stock_img()
     ax2.coastlines(resolution='110m')
-    ax2.add_artist(ScaleBarArtist())
+    ax2.add_artist(ScaleBarArtist(max_width=0.75))
 
     a = ScaleBarArtist(location=(0.5, 0.95), line_kwargs={'color': 'pink'})
     ax2.add_artist(a)

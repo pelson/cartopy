@@ -19,10 +19,11 @@ from __future__ import (absolute_import, division, print_function)
 
 import matplotlib.artist
 
+import math
+import sys
 
-import pytest
+import cartopy.geodesic
 import cartopy.crs as ccrs
-import matplotlib.pyplot as plt
 import numpy as np
 
 import matplotlib.lines as mlines
@@ -66,8 +67,6 @@ class _Unit(object):
         return self._UNITS_TO_ALIASES.get(self.unit, [self.unit])[0]
 
 
-import sys,math
-
 def round_sig_fig(number, sig_figs=7):
     y = abs(number)
 
@@ -103,7 +102,7 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
         self.units = _Unit(units)
 
         #: The matplotlib locator responsible for finding the scalebar ticks.
-        self.tick_locator = matplotlib.ticker.MaxNLocator(4)
+        self.tick_locator = matplotlib.ticker.MaxNLocator(5)
 
         #: The ticks that are used for the scalebar (computed)
         #: in the desired units.
@@ -150,14 +149,7 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
         p1 = ax_to_data.transform_point(p1)
 
         # Calculate maximum line length in meters on the ground (MOG).
-        npts = 40
-        def line_length(start_point, end_point):
-            xs = np.linspace(start_point[0], end_point[0], npts)
-            ys = np.linspace(start_point[1], end_point[1], npts)
-            points_ll = ccrs.Geodetic().transform_points(self.axes.projection, xs, ys)[:, :2].T
-            return line_len(points_ll)
-
-        max_line_length_m = line_length(p0, p1)
+        max_line_length_m = segment_length(ax.projection, p0, p1)
         max_line_length = self.units.from_meters(max_line_length_m) 
 
         # Compute the tick marks.
@@ -192,13 +184,13 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
             # Compute the start value.
             start = (min_start[0] + max_start[0]) / 2, (min_start[1] + max_start[1]) / 2
 
-            start_range = max([line_length(start, min_start), line_length(start, max_start)])
-            # line_length(max_start, min_start)
+            start_range = max([segment_length(ax.projection, start, min_start),
+                               segment_length(ax.projection, start, max_start)])
 
             def center_dist(start):
-                end = forward(self.axes.projection, start, p1, distance=scalebar_len_m)
+                end = forward(ax.projection, start, p1, distance=scalebar_len_m)
                 new_center = (start[0] + end[0]) / 2, (start[1] + end[1]) / 2
-                return line_length(new_center, center)
+                return segment_length(ax.projection, new_center, center)
 
             target = scalebar_len_m / 1e6
 
@@ -244,23 +236,16 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
         start = self._marker_locations[0]
         p1 = self._marker_locations[1]
 
-        xs, ys = zip(*self._marker_locations)
-
-        outline = self.bar_outline(xs, ys)
+        outline = self.bar_outline()
         if outline:
             artists.append(outline)
 
-        lines = self.scale_lines(ticks_m, start, p1)
-        if lines:
-            artists.extend(lines)
+        artists.extend(self.scale_lines() or [])
+        artists.extend(self.tick_texts() or [])
 
-        texts = self.tick_texts()
-        if texts:
-            artists.extend(texts)
-
-        t = self.scale_text(xs, ys, self._scalebar_length)
-        if t:
-            artists.append(t)
+        text = self.scale_text() 
+        if text:
+            artists.append(text)
 
         return artists
 
@@ -270,14 +255,17 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
     def tick_texts(self):
         return None
 
-    def bar_outline(self, xs, ys):
+    def bar_outline(self):
+        xs, ys = zip(*self._marker_locations)
         # Put a nice border around the scalebar.
         border = mlines.Line2D(
                 xs, ys, transform=self.axes.transData, **self.border_kwargs)
         border.axes = self.axes
         return border
 
-    def scale_text(self, xs, ys, bar_length):
+    def scale_text(self):
+        xs, ys = zip(*self._marker_locations)
+        bar_length = self._scalebar_length
         length = bar_length
         units = self.units.orig
 
@@ -354,9 +342,13 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
             t.axes = self.axes
             t.figure = self.figure
             texts.append(t)
-        # Only show the units on the last text. (and ensure the number is center aligned)
-        t.set_text('{2} {0} {1}'.format(length, units, ' ' * len(str(units) + ' ')))
-        
+
+        # Only show the units on the last text and ensure the number is center
+        # aligned by padding it with spaces on the RHS.
+        units_padding = ' ' * (len(str(units)) + 2)
+        t.set_text('{pad}{length} {units}'.format(
+            pad=units_padding, length=length, units=units))
+
         return texts
 
 
@@ -372,10 +364,13 @@ class ScaleBarArtist(_GenericScaleBarArtist):
         else:
             return {'color': 'black'}
 
-    def scale_lines(self, steps, start, extreme_end):
+    def scale_lines(self):
         lines = []
-        line_start = start
+        steps = self.units.to_meters(self._ticks)
+        start = self._marker_locations[0]
+        extreme_end = self._marker_locations[-1]
 
+        line_start = start
         for i, distance in enumerate(np.diff(steps)):
             line_style = self.line_stylization(i, steps)
             #import cartopy.mpl.style as cms
@@ -398,8 +393,9 @@ class ScaleBarArtist(_GenericScaleBarArtist):
 
 
 class ScaleLineArtist(_GenericScaleBarArtist):
-    def scale_lines(self, steps, start, extreme_end):
+    def scale_lines(self):
         lines = []
+        start = self._marker_locations[0]
         line_start = start
 
         x = [start[0]]
@@ -435,48 +431,96 @@ class ScaleLineArtist(_GenericScaleBarArtist):
     def bar_outline(self, *args, **kwargs):
         return None
 
-    def scale_text(self, xs, ys, bar_length):
+    def scale_text(self):
         return None
 
 
-
-def line_len(line):
+def segment_length(projection, start_point, end_point, npts=50):
     """
-    Determine the physical line length. The units are determined by this function.
+    Determine the physical length of the given line segment.
 
-    Line is in lons/lats
+    Parameters
+    ----------
+    projection : cartopy.crs.Projection
+        The projection of the line to measure.
+    start_point : coordinate pair
+        The location of the begining of the projected line in projected
+        coordinates.
+    end_point : coordinate pair
+        The location of the end of the projected line in projected
+        coordinates.
+    npts : integer
+        The number of samples to take along the line to approximate
+        the length in projected space.
 
+    Returns
+    -------
+    length : float
+        The length of the line formed by the given vertices in physical meters
+        on the ground.
 
-    >>> line_len(np.array([[0, 1], [1, 0]))
-    123
+    Examples
+    --------
+    >>> import cartopy.crs as ccrs
+    >>> round(segment_length(ccrs.PlateCarree(), [0, 1], [50, 100])
+    156900.0
 
     """
-    import cartopy.geodesic
+    xs = np.linspace(start_point[0], end_point[0], npts)
+    ys = np.linspace(start_point[1], end_point[1], npts)
+    points_ll = ccrs.PlateCarree().transform_points(projection, xs, ys)[:, :2]
     geod = cartopy.geodesic.Geodesic()
-    return geod.geometry_length(line.T)
+    return geod.geometry_length(points_ll)
 
 
-def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, npts=20, maxcount=100):
+def forward(projection, start_point, extreme_end_point, distance,
+            tol=0.000001, npts=20, maxiter=100):
     """
-    Return the end point of a straight line in the given projection, starting from
-    start_point and extending in the extreme_end_point direction until the line has the given distance.
+    Return the end point of a straight line of the given length in the
+    given projection.
 
-    This is an iterative solution which will terminate once the length reaches ``(abs(len - target) / target) < tol``.
+    Parameters
+    ----------
+    projection : cartopy.crs.Projection
+        The projection in which to find the point ``distance`` away
+        from ``p1`` in the ``p1`` direction.
+    p0 : coordinate pair
+        The projected coordinate of the starting point of the desired line.
+    p1_direction: coordinate pair
+        A point, in projected coordinates, that should be used to determine
+        the direction of the desired line. ``p1_direction`` must be at least
+        ``distance`` away from ``p0``.
+    distance : number
+        The distance, in physical meters, of the desired line.
+    tol : float
+        The convergence condition of this binary search algorithm, where
+        iteration breaks once
+        ``(abs(len_of_solution - target_length) / target_length) < tol``
+        is satisfied.
+    npts : int
+        The number of samples to take when projecting the line into geodetic
+        coordinates (passed through to ``segment_length``).
+    maxiter : int, optional
+        The maximum number of iterations allowed. If the number of iterations
+        exceeds this value, a ValueError will be raised.
+
+    Returns
+    -------
+    p1 : coordinate pair
+        The location, in projected coordinates which is approximately
+        ``distance`` from ``p0`` in the direction of ``p1_direction``.
+
     """
     start = start_point
     end = extreme_end_point
 
-    def line_length(start_point, end_point):
-        xs = np.linspace(start_point[0], end_point[0], npts)
-        ys = np.linspace(start_point[1], end_point[1], npts)
-        points_ll = ccrs.PlateCarree().transform_points(projection, xs, ys)[:, :2].T
-        return line_len(points_ll)
-    max_len = line_length(start, end)
+    max_len = segment_length(projection, start, end, npts=npts)
+    if distance < 0:
+        raise ValueError('Cannot project a line backwards (distance < 0).')
     if max_len < distance:
         raise ValueError(
-            'It is not possible to construct a straight line '
-            'of length {} from {} in the extreme_end_point direction of this projection.'
-            ''.format(distance, start_point))
+            'The distance between p0 and p1 is less than the '
+            'distance of the desired location from p0.')
     # Binary search of this line to get to the desired tolerance.
     current_length = max_len
     end_min = start
@@ -484,8 +528,9 @@ def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, 
 
     count = 0
     while np.abs(current_length - distance) / distance > tol:
-        midpoint = (end_min[0] + end_max[0]) * 0.5, (end_min[1] + end_max[1]) * 0.5
-        current_length = line_length(start, midpoint)
+        midpoint = [(end_min[0] + end_max[0]) * 0.5,
+                    (end_min[1] + end_max[1]) * 0.5]
+        current_length = segment_length(projection, start, midpoint)
         if current_length < distance:
             end_min = midpoint
         else:
@@ -495,6 +540,3 @@ def forward(projection, start_point, extreme_end_point, distance, tol=0.000001, 
         else:
             raise ValueError('Unable to iterate to sufficient accuracy.')
     return midpoint
-
-
-
