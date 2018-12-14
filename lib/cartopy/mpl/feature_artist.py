@@ -31,7 +31,7 @@ import matplotlib.artist
 import matplotlib.collections
 
 import cartopy.mpl.patch as cpatch
-from .style import merge as style_merge, finalize as style_finalize
+from .style import merge as style_merge, finalize as style_finalize, StyleProxy
 
 
 class _GeomKey(object):
@@ -116,7 +116,8 @@ class FeatureArtist(matplotlib.artist.Artist):
         if kwargs is None:
             kwargs = {}
         self._styler = kwargs.pop('styler', None)
-        self._kwargs = dict(kwargs)
+        self._kwargs = StyleProxy(dict(kwargs))
+        self._style = self._kwargs
 
         if 'color' in self._kwargs:
             # We want the user to be able to override both face and edge
@@ -227,3 +228,10 @@ class FeatureArtist(matplotlib.artist.Artist):
 
         # n.b. matplotlib.collection.Collection.draw returns None
         return None
+
+
+# Attach methods to the FeatureArtist that one would expect for
+# PathCollection type artist.
+StyleProxy._attach_artist_methods(
+    FeatureArtist,
+    matplotlib.collections.PathCollection)

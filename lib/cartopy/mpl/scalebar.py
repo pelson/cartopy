@@ -17,18 +17,20 @@
 
 from __future__ import (absolute_import, division, print_function)
 
-import matplotlib.artist
 
 import math
 import sys
 
-import cartopy.geodesic
-import cartopy.crs as ccrs
-import numpy as np
-
+import matplotlib.artist
 import matplotlib.lines as mlines
 import matplotlib.text as mtext
 import matplotlib.patheffects as path_effects
+import matplotlib.transforms as mtransforms
+import numpy as np
+
+import cartopy.geodesic
+import cartopy.crs as ccrs
+from cartopy.mpl.style import Line2DProxy, PatchProxy
 
 
 class _Unit(object):
@@ -79,9 +81,14 @@ def round_sig_fig(number, sig_figs=7):
 
 
 class _GenericScaleBarArtist(matplotlib.artist.Artist):
+    DEFAULTS = {}
+    DEFAULTS['tick_kwargs'] = {}
+    DEFAULTS['text_kwargs'] = dict(color='white', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
     def __init__(self, location=(0.5, 0.075), max_width=0.3,
                  line_kwargs=None, border_kwargs=None, text_kwargs=None, units='km',
-                 tick_text_y_offset=-6, alignment='center'):
+                 tick_kwargs=None,
+                 tick_text_y_offset=-6, alignment='center',
+                 proxy_location=None):
 
         #: The position of the scalebar in Axes coordinates.
         self.location = np.array(location)
@@ -89,9 +96,20 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
         #: The maximum width, in Axes coordinate, of the scalebar.
         self.max_width = max_width
 
-        self.line_kwargs = line_kwargs or dict()
-        self.border_kwargs = border_kwargs or dict(color='black', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
-        self.text_kwargs = text_kwargs or dict(color='white', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')])
+        self.tick_kwargs = PatchProxy()
+        if tick_kwargs is None:
+            self.tick_kwargs.update_style(self.DEFAULTS['tick_kwargs'])
+        else:
+            self.tick_kwargs.update_style(tick_kwargs)
+        self.bar_kwargs = Line2DProxy(line_kwargs or dict())
+        self.border_kwargs = PatchProxy(border_kwargs or dict(color='black', path_effects=[path_effects.withStroke(linewidth=3, foreground='black')]))
+
+        self.text_kwargs = PatchProxy()
+        if text_kwargs is None:
+            self.text_kwargs.update_style(self.DEFAULTS['text_kwargs'])
+        else:
+            self.text_kwargs.update_style(text_kwargs)
+
         self.zorder = 50
 
         #: The offset of the tick text. If None, no tick text to be drawn.
@@ -111,6 +129,13 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
         #: The x and y locations of the ticks (computed)
         #: in the projected coordinate system.
         self._marker_locations = tuple()
+
+        if proxy_location is not None:
+            self._proxy_location = np.array(proxy_location)
+            self._proxy_shift = self.location - proxy_location
+        else:
+            self._proxy_location = proxy_location
+            self._proxy_shift = np.array([0, 0])
 
         #: The total of this scalebar (computed) in
         #: the desired units.
@@ -132,16 +157,19 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
         """
         ax = self.axes
         ax_to_data = ax.transAxes - ax.transData
+        loc = self.location
+        if self._proxy_location is not None:
+            loc = self._proxy_location
 
         if self.alignment == 'center':
-            center = ax_to_data.transform_point(self.location)
-            p0 = self.location - [self.max_width / 2, 0]
-            p1 = self.location + [self.max_width / 2, 0]
+            center = ax_to_data.transform_point(loc)
+            p0 = loc - [self.max_width / 2, 0]
+            p1 = loc + [self.max_width / 2, 0]
         elif self.alignment in 'left':
-            p0 = self.location
+            p0 = loc
             p1 = p0 + [self.max_width, 0]
         elif self.alignment == 'right':
-            p1 = self.location
+            p1 = loc
             p0 = p1 - [self.max_width, 0]
         else:
             raise ValueError('Unknown alignment {}'.format(self.alignment))
@@ -226,15 +254,15 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
             line_start = line_end
 
         self._marker_locations = tuple(marker_locs)
+        self._marker_locations_ax = self.data_to_ax(self._marker_locations)
+
+    def data_to_ax(self, values):
+        return (self.axes.transData - self.axes.transAxes).transform(values)
 
     def scalebar_artists(self, linewidth=3, units='km'):
         self.update_scalebar_properties()
 
         artists = []
-
-        ticks_m = self.units.to_meters(self._ticks)
-        start = self._marker_locations[0]
-        p1 = self._marker_locations[1]
 
         outline = self.bar_outline()
         if outline:
@@ -249,27 +277,34 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
 
         return artists
 
-    def scale_lines(self, steps, start, extreme_end):
+    def scale_lines(self):
         return None
 
-    def tick_texts(self):
-        return None
+    def shifted_transAxes(self):
+        trans = mtransforms.Affine2D().translate(*self._proxy_shift) + self.axes.transAxes
+        return trans
 
     def bar_outline(self):
-        xs, ys = zip(*self._marker_locations)
+        xs, ys = zip(*self._marker_locations_ax)
         # Put a nice border around the scalebar.
+
         border = mlines.Line2D(
-                xs, ys, transform=self.axes.transData, **self.border_kwargs)
+                xs, ys, transform=self.shifted_transAxes(), **self.border_kwargs.style)
         border.axes = self.axes
         return border
 
     def scale_text(self):
+        # If the label isn't visible, there is no point creating
+        # the arist in the first place.
+        if not self.text_kwargs.get('visible', True):
+            return None
+
         xs, ys = zip(*self._marker_locations)
         bar_length = self._scalebar_length
         length = bar_length
         units = self.units.orig
 
-        xs, ys = zip(*self._marker_locations)
+        xs, ys = zip(*self._marker_locations_ax)
         xs = np.array(xs)
         ys = np.array(ys)
 
@@ -290,39 +325,55 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
             verticalalignment = 'top'
         dx, dy = 0, offset / 72.
 
-        import matplotlib.transforms as transforms
-        offset = transforms.ScaledTranslation(dx, dy,
-                                              self.figure.dpi_scale_trans)
-        shadow_transform = self.axes.transData + offset
+        offset = mtransforms.ScaledTranslation(
+            dx, dy, self.figure.dpi_scale_trans)
 
         t = mtext.Text(xs.mean(), ys.mean(),
-                       '{0} {1}'.format(length, units), transform=self.axes.transData + offset,
-                       horizontalalignment='center', verticalalignment=verticalalignment, **self.text_kwargs)
+                       '{0} {1}'.format(length, units), transform=self.shifted_transAxes() + offset,
+                       horizontalalignment='center', verticalalignment=verticalalignment)
+        self.text_kwargs.apply(t)
+
         t.axes = self.axes
         t.figure = self.figure
         return t
 
     def tick_texts(self):
-        xs, ys = zip(*self._marker_locations)
+        # If the ticks aren't visible, there is no point creating
+        # the arists in the first place.
+        if not self.tick_kwargs.get('visible', True):
+            return None
+        
+        xs, ys = zip(*self._marker_locations_ax)
         ticks = self._ticks
         ticks = self.units.to_meters(ticks)
 
         units = self.units.orig
-        texts = []
+        labels = []
+
         for x, y, tick in zip(xs, ys, ticks):
             length = tick
 
             length = self.units.from_meters(length)
 
-            # 7 significant figures is enough precision for everything.
+            # 7 significant figures is enough precision for everything,
+            # if you want more precision change your units.
             length = round_sig_fig(length, 7)
 
             if length.is_integer():
                 length = int(length)
 
-#            if length == 0:
-#                continue
-            import matplotlib.transforms as transforms
+            label = '{0}'.format(length, units)
+            labels.append(label)
+
+        # Only show the units on the last text and ensure the number is center
+        # alignable by padding it with spaces on the RHS.
+        units_padding = ' ' * (len(str(units)) + 2)
+        labels[-1] = ('{pad}{length} {units}'.format(
+            pad=units_padding, length=length, units=units))
+
+        texts = []
+        for x, y, label, tick in zip(xs, ys, labels, ticks):
+
             # shift the object down 6 points
             offset = self.tick_text_y_offset
 
@@ -333,31 +384,26 @@ class _GenericScaleBarArtist(matplotlib.artist.Artist):
             else:
                 verticalalignment = 'top'
             dx, dy = 0, offset / 72.
-            offset = transforms.ScaledTranslation(dx, dy,
-                                                  self.figure.dpi_scale_trans)
-            shadow_transform = self.axes.transData + offset
-            t = mtext.Text(x, y,
-                           '{0}'.format(length, units), transform=self.axes.transData + offset,
-                           horizontalalignment='center', verticalalignment=verticalalignment, **self.text_kwargs)
+            offset = mtransforms.ScaledTranslation(
+                dx, dy, self.figure.dpi_scale_trans)
+            t = mtext.Text(x, y, label,
+                           transform=self.shifted_transAxes() + offset,
+                           horizontalalignment='center', verticalalignment=verticalalignment)
+            self.tick_kwargs.apply(t, context={'ticks': ticks, 'tick': tick})
             t.axes = self.axes
             t.figure = self.figure
             texts.append(t)
-
-        # Only show the units on the last text and ensure the number is center
-        # aligned by padding it with spaces on the RHS.
-        units_padding = ' ' * (len(str(units)) + 2)
-        t.set_text('{pad}{length} {units}'.format(
-            pad=units_padding, length=length, units=units))
-
         return texts
 
 
 class ScaleBarArtist(_GenericScaleBarArtist):
+    DEFAULTS = _GenericScaleBarArtist.DEFAULTS.copy()
+    DEFAULTS['tick_kwargs'] = {'visible': False}
     def line_stylization(self, step_index, steps):
         """
         Given the step we are to draw, and a list of all
         other steps that are going to be drawn, return a
-        style dictionary that can be merged with self.line_kwargs.
+        style dictionary that can be merged with self.bar_kwargs.
         """
         if step_index % 2:
             return {'color': 'white'}
@@ -367,41 +413,41 @@ class ScaleBarArtist(_GenericScaleBarArtist):
     def scale_lines(self):
         lines = []
         steps = self.units.to_meters(self._ticks)
-        start = self._marker_locations[0]
-        extreme_end = self._marker_locations[-1]
+        start = self._marker_locations_ax[0]
+        extreme_end = self._marker_locations_ax[-1]
 
         line_start = start
+        transAxes = self.shifted_transAxes()
         for i, distance in enumerate(np.diff(steps)):
             line_style = self.line_stylization(i, steps)
             #import cartopy.mpl.style as cms
-            #style = cms.merge(line_style, self.line_kwargs)
+            #style = cms.merge(line_style, self.bar_kwargs.style)
             # Don't use cms.merge here because that assumed PathCollections, not lines.
-            line_style.update(self.line_kwargs)
+            line_style.update(self.bar_kwargs.style)
             style = line_style
 
-            line = [self._marker_locations[i], self._marker_locations[i+1]]
+            line = [self._marker_locations_ax[i], self._marker_locations_ax[i+1]]
             xs, ys = zip(*line)
             line = mlines.Line2D(
                 xs, ys,
-                transform=self.axes.transData, **style)
+                transform=transAxes, **style)
             line.axes = self.axes
             lines.append(line)
         return lines
 
-    def tick_texts(self):
-        return None
-
 
 class ScaleLineArtist(_GenericScaleBarArtist):
+    DEFAULTS = _GenericScaleBarArtist.DEFAULTS.copy()
+    DEFAULTS['tick_kwargs'] = {}
     def scale_lines(self):
         lines = []
-        start = self._marker_locations[0]
+        start = self._marker_locations_ax[0]
         line_start = start
 
         x = [start[0]]
         y = [start[1]]
         marker_locs = [start]
-        style = self.line_kwargs
+        style = self.tick_kwargs
         style = {'marker': '|', 'markersize': abs(self.tick_text_y_offset or 5) - 2, 'markeredgewidth': 1, 'color': 'black', 'linestyle': 'solid'}
 
         style.update(dict(solid_capstyle='butt'))
@@ -419,8 +465,8 @@ class ScaleLineArtist(_GenericScaleBarArtist):
             style['marker'] = matplotlib.markers.TICKDOWN
         dx, dy = 0, offset / 72.
 
-        xs, ys = zip(*self._marker_locations)
-        line = mlines.Line2D(xs, ys, transform=self.axes.transData, **style)
+        xs, ys = zip(*self._marker_locations_ax)
+        line = mlines.Line2D(xs, ys, transform=self.shifted_transAxes(), **style)
         lines = [line]
 
         return lines
@@ -519,14 +565,16 @@ def forward(projection, start_point, extreme_end_point, distance,
         raise ValueError('Cannot project a line backwards (distance < 0).')
     if max_len < distance:
         raise ValueError(
-            'The distance between p0 and p1 is less than the '
-            'distance of the desired location from p0.')
+            'The distance between p0 and p1 ({}) is less than the '
+            'distance of the desired location from p0 ({}).'
+            ''.format(distance, max_len))
     # Binary search of this line to get to the desired tolerance.
     current_length = max_len
     end_min = start
     end_max = end
 
     count = 0
+    midpoint = end
     while np.abs(current_length - distance) / distance > tol:
         midpoint = [(end_min[0] + end_max[0]) * 0.5,
                     (end_min[1] + end_max[1]) * 0.5]
@@ -535,7 +583,7 @@ def forward(projection, start_point, extreme_end_point, distance,
             end_min = midpoint
         else:
             end_max = midpoint
-        if count < maxcount:
+        if count < maxiter:
             count += 1
         else:
             raise ValueError('Unable to iterate to sufficient accuracy.')

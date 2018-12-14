@@ -25,6 +25,10 @@ import warnings
 
 import six
 
+import matplotlib.artist
+import matplotlib.patches
+import matplotlib.lines
+
 
 # Define the matplotlib style aliases that cartopy can expand.
 # Note: This should not contain the plural aliases
@@ -40,6 +44,94 @@ _ALIASES = {
     'fc': 'facecolor',
     'ec': 'edgecolor',
 }
+
+
+class StyleProxy(object):
+    def __init__(self, style=None, callbacks=None):
+        self._style = style or {}
+        self._callbacks = callbacks or []
+
+    def update_style(self, other_style):
+        # Note this is not using merge() as we are only managing a
+        # single style dictionary. merge() is exclusively for when we
+        # need to blend multiple levels of style definition.
+        # HOWEVER: It would be good to get aliases... e.g. self.style['lw'] = 1; self.style['linewidth'] == 1
+        self._style.update(other_style)
+
+    def apply(self, artist, context=None):
+        if self.style:
+            matplotlib.artist.setp(artist, **self.style)
+        for callback in self._callbacks:
+            callback(artist, context=context)
+
+    # TODO: Choose which one.
+    update = update_style
+    @property
+    def style(self):
+        # NOTE: users still need to call finalize.
+        return self._style.copy()
+
+    def __getitem__(self, key):
+        return self._style[key]
+
+    def __setitem__(self, key, value):
+        return self._style.__setitem__(key, value)
+
+    def get(self, key, default=None):
+        return self._style.get(key, default)
+
+    def __iter__(self):
+        return iter(self._style)
+    
+    @staticmethod
+    def _attach_artist_methods(klass, proxying_klass):
+        """
+        Put setters and getters that one would expect from a matplotlib
+        artist on the given class.
+
+        Parameters
+        ----------
+        klass : type
+            The class on which to add the matplotlib-like methods.
+        proxying_klass : klass
+            The matplotlib artist type that is being proxied.
+
+        """
+        # Define a function that can produce our getters and setters.
+        # This has the added advantage of being a closure over the prop
+        # which will simplify our subsequent for-loop.
+        def _attach_setters_and_getters(klass, prop):
+            getter_name = 'get_{}'.format(prop)
+            # Attach a getter for the prop.
+            def getter_meth(self):
+                return self._style.get(prop)
+            setattr(klass, getter_name, getter_meth)
+
+            setter_name = 'set_{}'.format(prop)
+            def setter_meth(self, v):
+                return self._style.__setitem__(prop, v)
+            setattr(klass, setter_name, setter_meth)
+
+        # Use the standard matplotlib machinery to find out what we should be setting
+        # for a PathCollection.
+        _inspector = matplotlib.artist.ArtistInspector(
+            proxying_klass)
+
+        # Attach the actual set_* and get_* methods.
+        for _prop in _inspector.get_setters():
+            _attach_setters_and_getters(klass, _prop)
+
+
+class PatchProxy(StyleProxy):
+    pass
+
+
+class Line2DProxy(StyleProxy):
+    pass
+
+
+StyleProxy._attach_artist_methods(PatchProxy, matplotlib.patches.Patch)
+StyleProxy._attach_artist_methods(Line2DProxy, matplotlib.lines.Line2D)
 
 
 def merge(*style_dicts):
@@ -111,3 +203,6 @@ def finalize(style):
     if facecolor == 'never':
         style['facecolor'] = 'none'
     return style
+
+
+
