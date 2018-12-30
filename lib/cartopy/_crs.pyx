@@ -36,7 +36,6 @@ from cython.operator cimport dereference as deref
 
 
 cdef extern from "proj_api.h":
-    ctypedef void *projPJ
     projPJ pj_init_plus(char *)
     void pj_free(projPJ)
     int pj_transform(projPJ, projPJ, long, int, double *, double *, double *)

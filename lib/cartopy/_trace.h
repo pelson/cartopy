@@ -84,6 +84,26 @@ class SphericalInterpolator : public Interpolator
 };
 
 
+typedef Point (*interpolator_callback_t)(void* py_callback, const Point &point);
+typedef struct {
+    interpolator_callback_t callback;
+    void* user_data;
+} callback_t;
+
+
+class CallbackInterpolator : public Interpolator
+{
+    public:
+    CallbackInterpolator(interpolator_callback_t callback, void* py_callback);
+    Point interpolate(double t);
+    Point project(const Point &point);
+
+    private:
+    interpolator_callback_t m_callback;
+    void* m_py_callback;
+};
+
+
 GEOSGeometry *_project_line_string(GEOSContextHandle_t handle,
                                    GEOSGeometry *g_line_string,
                                    Interpolator *interpolator,

@@ -165,6 +165,27 @@ Point SphericalInterpolator::project(const Point &lonlat)
 }
 
 
+Point CallbackInterpolator::interpolate(double t)
+{
+    Point xy;
+    xy.x = m_start.x + (m_end.x - m_start.x) * t;
+    xy.y = m_start.y + (m_end.y - m_start.y) * t;
+    return project(xy);
+}
+
+Point CallbackInterpolator::project(const Point &src_xy)
+{
+    Point pt = m_callback(m_py_callback, src_xy);
+    return pt;
+}
+
+CallbackInterpolator::CallbackInterpolator(interpolator_callback_t callback, void* py_callback)
+{
+    m_callback = callback;
+    m_py_callback = py_callback;
+}
+
+
 typedef std::list<Point> Line;
 
 class LineAccumulator

@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with cartopy.  If not, see <https://www.gnu.org/licenses/>.
 #
-# cython: embedsignature=True
+# cython: embedsignature=True, language_level=3, language='c++'
 
 """
 This module pulls together ``_trace.cpp``, proj, GEOS and ``_crs.pyx`` to
@@ -24,6 +24,7 @@ implement a function to project a `~shapely.geometry.LinearRing` /
 manually, instead leaving the processing to be done by the
 :class:`cartopy.crs.Projection` subclasses.
 """
+
 
 from libc.stdint cimport uintptr_t as ptr
 
@@ -48,11 +49,21 @@ cdef extern from "_trace.h":
     cdef cppclass Interpolator:
         pass
 
+    ctypedef struct Point:
+        double x;
+        double y;
+
+    ctypedef Point (*interpolator_callback_t)(void* py_callback, const Point &point);
+
+    cdef cppclass CallbackInterpolator:
+        CallbackInterpolator(interpolator_callback_t callback, void* py_callback)
+
     cdef cppclass SphericalInterpolator:
         SphericalInterpolator(projPJ src_proj, projPJ dest_proj)
 
     cdef cppclass CartesianInterpolator:
         CartesianInterpolator(projPJ src_proj, projPJ dest_proj)
+
 
     # XXX Rename? It handles LinearRings too.
     GEOSGeometry *_project_line_string(GEOSContextHandle_t handle,
@@ -86,6 +97,29 @@ cdef shapely_from_geos(GEOSGeometry *geom):
     return multi_line_string
 
 
+cdef Point callback(void* py_callback, const Point &point):
+    cdef Point dest_xy;
+    cdef object result;
+    result = (<object>py_callback)(point.x, point.y);
+    if result is not None:
+        dest_xy.x, dest_xy.y = result
+    return dest_xy;
+
+
+cdef Interpolator* to_interpolator(CRS src_crs, CRS dest_projection):
+    if src_crs.is_geodetic():
+        interpolator = <Interpolator *>new SphericalInterpolator(
+                src_crs.proj4, (<CRS>dest_projection).proj4)
+    elif hasattr(dest_projection, '_prj_fn'):
+        interpolator = <Interpolator *>new CallbackInterpolator(
+                callback, <void*>dest_projection._prj_fn)
+    else:
+        interpolator = <Interpolator *>new CartesianInterpolator(
+                src_crs.proj4, (<CRS>dest_projection).proj4)
+
+    return interpolator
+
+
 def project_linear(geometry not None, CRS src_crs not None,
                    dest_projection not None):
     """
@@ -117,13 +151,8 @@ def project_linear(geometry not None, CRS src_crs not None,
 
     g_domain = geos_from_shapely(dest_projection.domain)
 
-    if src_crs.is_geodetic():
-        interpolator = <Interpolator *>new SphericalInterpolator(
-                src_crs.proj4, (<CRS>dest_projection).proj4)
-    else:
-        interpolator = <Interpolator *>new CartesianInterpolator(
-                src_crs.proj4, (<CRS>dest_projection).proj4)
-
+    interpolator = to_interpolator(src_crs, dest_projection)
+   
     g_multi_line_string = _project_line_string(handle, g_linear,
                                                interpolator, g_domain, threshold)
     del interpolator
