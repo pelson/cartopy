@@ -175,12 +175,43 @@ Point CallbackInterpolator::interpolate(double t)
 
 Point CallbackInterpolator::project(const Point &src_xy)
 {
-    Point pt = m_callback(m_py_callback, src_xy);
+
+    Point dest_xy;
+    projLP xy;
+
+    xy.u = src_xy.x;
+    xy.v = src_xy.y;
+
+    int status = pj_transform(m_src_proj, m_dest_proj, 1, 1, &xy.u, &xy.v, NULL);
+    if (status == -14 || status == -20)
+    {
+        // -14 => "latitude or longitude exceeded limits"
+        // -20 => "tolerance condition error"
+        xy.u = xy.v = HUGE_VAL;
+    }
+    else if (status != 0)
+    {
+        // TODO: Raise a Python exception instead
+        std::cerr << "*******************" << std::endl;
+        std::cerr << status << std::endl;
+        std::cerr << pj_strerrno(status) << std::endl;
+        exit(2);
+    }
+
+    dest_xy.x = xy.u;
+    dest_xy.y = xy.v;
+
+    // NOTE: Above is exactly the same as CartesianInterpolator::project. Factor it out.
+
+    // dest_xy is now in spherical coords.
+    Point pt = m_callback(m_py_callback, dest_xy);
     return pt;
 }
 
-CallbackInterpolator::CallbackInterpolator(interpolator_callback_t callback, void* py_callback)
+CallbackInterpolator::CallbackInterpolator(projPJ src_proj, interpolator_callback_t callback, void* py_callback)
 {
+    m_src_proj = src_proj;
+    m_dest_proj = pj_init_plus("+proj=lonlat");
     m_callback = callback;
     m_py_callback = py_callback;
 }

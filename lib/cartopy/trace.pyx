@@ -56,7 +56,7 @@ cdef extern from "_trace.h":
     ctypedef Point (*interpolator_callback_t)(void* py_callback, const Point &point);
 
     cdef cppclass CallbackInterpolator:
-        CallbackInterpolator(interpolator_callback_t callback, void* py_callback)
+        CallbackInterpolator(projPJ src_proj, interpolator_callback_t callback, void* py_callback)
 
     cdef cppclass SphericalInterpolator:
         SphericalInterpolator(projPJ src_proj, projPJ dest_proj)
@@ -112,7 +112,7 @@ cdef Interpolator* to_interpolator(CRS src_crs, CRS dest_projection):
                 src_crs.proj4, (<CRS>dest_projection).proj4)
     elif hasattr(dest_projection, '_prj_fn'):
         interpolator = <Interpolator *>new CallbackInterpolator(
-                callback, <void*>dest_projection._prj_fn)
+                src_crs.proj4, callback, <void*>dest_projection._prj_fn)
     else:
         interpolator = <Interpolator *>new CartesianInterpolator(
                 src_crs.proj4, (<CRS>dest_projection).proj4)

@@ -94,13 +94,14 @@ typedef struct {
 class CallbackInterpolator : public Interpolator
 {
     public:
-    CallbackInterpolator(interpolator_callback_t callback, void* py_callback);
+    CallbackInterpolator(projPJ src_proj, interpolator_callback_t callback, void* py_callback);
     Point interpolate(double t);
     Point project(const Point &point);
 
     private:
     interpolator_callback_t m_callback;
     void* m_py_callback;
+    projPJ m_src_proj, m_dest_proj;
 };
 
 
