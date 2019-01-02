@@ -186,12 +186,29 @@ cdef class RadiansOutProj4Transformer(Proj4Transformer):
         return result
 
 
+cdef class GenericTransformer(Transformer):
+    def __init__(self, callback):
+        self.callback = callback
+
+    cpdef coords(self, np.ndarray[np.float64_t] coords):
+        return self.callback(coords)
+
 cdef class TwoStageTransformer(Transformer):
     """
     Converts to Lon/Lat, then on to the desired projection.
 
     """
+    def __init__(self, Transformer inverse_transformer, Transformer forward_transformer):
+        self.inverse = inverse_transformer
+        self.forward = forward_transformer
 
+    #cpdef coords(self, np.ndarray[np.float64_t] coords):
+    #    print("TWO")
+    #    a, b = self.inverse.coords(coords)
+    #    print(a, b)
+    #    r = self.forward.coords(np.array([a, b]))
+    #    print(r)
+    #    return r
 
 cdef class CRS:
     """
@@ -264,11 +281,18 @@ cdef class CRS:
         # Use the python form, not the C form. Gives us much easier
         # access to mutable initialisation.
         #cdef Transformer transformer
-        print('Transformer', other)
-        if hasattr(other, '_prj_callback'):
-            print('DO IT!')
-            transformer = TwoStageTransformer()
-        elif other.is_geodetic():
+#        if hasattr(self, '_prj_function'):
+#            inverse = Proj4Transformer(other.proj4_init, other.as_geodetic().proj4_init)
+#            forward = GenericTransformer(self._proj_function)
+#            transformer = TwoStageTransformer(inverse, forward)
+#        elif hasattr(other, '_prj_function_inverse'):
+#            # TODO: IMPLEMENT THIS
+#            inverse = Proj4Transformer(other.proj4_init, other.as_geodetic().proj4_init)
+#            forward = GenericTransformer(self._proj_function)
+#            transformer = TwoStageTransformer(inverse, forward)
+
+        if other.is_geodetic():
+        #elif other.is_geodetic():
             transformer = RadiansInProj4Transformer(other.proj4_init, self.proj4_init)
         elif self.is_geodetic():
             transformer = RadiansOutProj4Transformer(other.proj4_init, self.proj4_init)

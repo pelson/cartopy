@@ -23,14 +23,18 @@ to project a `~shapely.geometry.LinearRing` / `~shapely.geometry.LineString`.
 In general, this should never be called manually, instead leaving the
 processing to be done by the :class:`cartopy.crs.Projection` subclasses.
 """
+from cartopy._crs cimport CRS
+import numpy as np
+cimport numpy as np
 
 cimport cython
 from libc.math cimport HUGE_VAL, sqrt
-from numpy.math cimport isfinite, isnan
+#from numpy.math cimport isfinite, isnan
 from libc.stdint cimport uintptr_t as ptr
 from libcpp cimport bool
 from libcpp.list cimport list
 from libcpp.vector cimport vector
+
 
 cdef bool DEBUG = False
 
@@ -58,7 +62,6 @@ cdef extern from "geos_c.h":
     void GEOSPreparedGeom_destroy_r(GEOSContextHandle_t handle, const GEOSPreparedGeometry* g) nogil
     cdef int GEOS_MULTILINESTRING
 
-from cartopy._crs cimport CRS
 from ._proj4 cimport (projPJ, projLP, pj_get_spheroid_defn, pj_transform,
                       pj_strerrno, DEG_TO_RAD)
 from .geodesic._geodesic cimport (geod_geodesic, geod_geodesicline,
@@ -291,7 +294,7 @@ cdef State get_state(const Point &point, const GEOSPreparedGeometry *gp_domain,
     cdef GEOSCoordSequence *coords
     cdef GEOSGeometry *g_point
 
-    if isfinite(point.x) and isfinite(point.y):
+    if np.math.isfinite(point.x) and np.math.isfinite(point.y):
         # TODO: Avoid create-destroy
         coords = GEOSCoordSeq_create_r(handle, 1, 2)
         GEOSCoordSeq_setX_r(handle, coords, 0, point.x)
@@ -342,9 +345,9 @@ cdef bool straightAndDomain(double t_start, const Point &p_start,
     cdef GEOSGeometry *g_segment
 
     # This could be optimised out of the loop.
-    if not (isfinite(p_start.x) and isfinite(p_start.y)):
+    if not (np.math.isfinite(p_start.x) and np.math.isfinite(p_start.y)):
         valid = False
-    elif not (isfinite(p_end.x) and isfinite(p_end.y)):
+    elif not (np.math.isfinite(p_end.x) and np.math.isfinite(p_end.y)):
         valid = False
     else:
         # Find the projected mid-point
@@ -386,7 +389,7 @@ cdef bool straightAndDomain(double t_start, const Point &p_start,
 
         along = (seg_dx*mid_dx + seg_dy*mid_dy) / seg_hypot_sq
 
-        if isnan(along):
+        if np.math.isnan(along):
             valid = True
         else:
             valid = 0.0 < along < 1.0
@@ -473,7 +476,7 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
                                       interpolator, threshold,
                                       handle, gp_domain, False)
         else:
-            valid = not isfinite(p_current.x) or not isfinite(p_current.y)
+            valid = not np.math.isfinite(p_current.x) or not np.math.isfinite(p_current.y)
 
         if DEBUG:
             print("   => valid: ", valid)
@@ -496,7 +499,7 @@ cdef void _project_segment(GEOSContextHandle_t handle,
                            const GEOSPreparedGeometry *gp_domain,
                            double threshold, LineAccumulator lines):
     cdef Point p_current, p_min, p_max, p_end
-    cdef double t_current, t_min, t_max
+    cdef double t_current, t_min=0, t_max=0
     cdef State state
 
     GEOSCoordSeq_getX_r(handle, src_coords, src_idx_from, &p_current.x)

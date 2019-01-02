@@ -16,6 +16,7 @@
 # along with cartopy.  If not, see <https://www.gnu.org/licenses/>.
 
 cimport numpy as np
+import numpy as np
 from ._proj4 cimport projPJ
 
 
@@ -27,8 +28,10 @@ cdef class Proj4Transformer(Transformer):
     cdef projPJ src_proj
     cdef projPJ dest_proj
 
-cdef class TwoStageTransformer(Transformer):
-    pass
+#cdef class TwoStageTransformer(Transformer):
+#    cdef Transformer inverse
+#    cdef Transformer forward
+
 
 cdef class CRS:
     """
