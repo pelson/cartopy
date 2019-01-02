@@ -15,9 +15,20 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with cartopy.  If not, see <https://www.gnu.org/licenses/>.
 
-
+cimport numpy as np
 from ._proj4 cimport projPJ
 
+
+cdef class Transformer:
+    cpdef coords(self, np.ndarray[np.float64_t] coords)
+
+
+cdef class Proj4Transformer(Transformer):
+    cdef projPJ src_proj
+    cdef projPJ dest_proj
+
+cdef class TwoStageTransformer(Transformer):
+    pass
 
 cdef class CRS:
     """
@@ -30,3 +41,4 @@ cdef class CRS:
     cdef proj4_params
 
     cpdef is_geodetic(self)
+    cpdef Transformer transformer(self, CRS other)

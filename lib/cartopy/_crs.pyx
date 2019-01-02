@@ -37,6 +37,7 @@ from cython.operator cimport dereference as deref
 
 from ._proj4 cimport (pj_init_plus, pj_free, pj_transform, pj_is_latlong,
                       pj_strerrno, pj_get_errno_ref, pj_get_release,
+                      projPJ,
                       DEG_TO_RAD, RAD_TO_DEG)
 
 
@@ -124,6 +125,74 @@ class Globe(object):
         return OrderedDict((k, v) for k, v in proj4_params if v is not None)
 
 
+cdef class Transformer:
+    """
+    The thing that converts from one coordinate system to another.
+
+    """
+    cpdef coords(self, np.ndarray[np.float64_t] coords):
+        print('FOO: transform coords')
+
+
+cdef class Proj4Transformer(Transformer):
+    def __init__(self, str src, str dest):
+        print('CONSTRUCT:', src, dest)
+        proj4_init_bytes = six.b(src)
+        self.src_proj = pj_init_plus(proj4_init_bytes)
+        if not self.src_proj:
+            raise Proj4Error()
+
+        proj4_init_bytes = six.b(dest)
+        self.dest_proj = pj_init_plus(proj4_init_bytes)
+        if not self.dest_proj:
+            raise Proj4Error()
+
+    cpdef coords(self, np.ndarray[np.float64_t] coords):
+        cdef:
+            double cx, cy
+            int status
+        cx = coords[..., 0]
+        cy = coords[..., 1]
+        print('INSIDE:', cx, cy)
+        # TODO: Remove this - perhaps make it another Transformer...
+        #if src_crs.is_geodetic():
+        #    cx *= DEG_TO_RAD
+        #    cy *= DEG_TO_RAD
+        status = pj_transform(self.src_proj, self.dest_proj, 1, 1, &cx, &cy, NULL);
+        print('FOO:', cx, cy)
+        if status == -14 or status == -20:
+            # -14 => "latitude or longitude exceeded limits"
+            # -20 => "tolerance condition error"
+            cx = cy = NAN
+        elif status != 0:
+            raise Proj4Error()
+
+        #if self.is_geodetic():
+        #    cx *= RAD_TO_DEG
+        #    cy *= RAD_TO_DEG
+        return (cx, cy)
+
+
+cdef class RadiansInProj4Transformer(Proj4Transformer):
+    cpdef coords(self, np.ndarray[np.float64_t] coords):
+        coords = coords * DEG_TO_RAD
+        result = Proj4Transformer.coords(self, coords)
+        return result
+
+cdef class RadiansOutProj4Transformer(Proj4Transformer):
+    cpdef coords(self, np.ndarray[np.float64_t] coords):
+        result = Proj4Transformer.coords(self, coords)
+        result = result[0] * RAD_TO_DEG, result[1] * RAD_TO_DEG
+        return result
+
+
+cdef class TwoStageTransformer(Transformer):
+    """
+    Converts to Lon/Lat, then on to the desired projection.
+
+    """
+
+
 cdef class CRS:
     """
     Define a Coordinate Reference System using proj.
@@ -190,6 +259,22 @@ cdef class CRS:
         self.proj4 = pj_init_plus(proj4_init_bytes)
         if not self.proj4:
             raise Proj4Error()
+
+    cpdef Transformer transformer(self, CRS other):
+        # Use the python form, not the C form. Gives us much easier
+        # access to mutable initialisation.
+        #cdef Transformer transformer
+        print('Transformer', other)
+        if hasattr(other, '_prj_callback'):
+            print('DO IT!')
+            transformer = TwoStageTransformer()
+        elif other.is_geodetic():
+            transformer = RadiansInProj4Transformer(other.proj4_init, self.proj4_init)
+        elif self.is_geodetic():
+            transformer = RadiansOutProj4Transformer(other.proj4_init, self.proj4_init)
+        else:
+            transformer = Proj4Transformer(other.proj4_init, self.proj4_init)
+        return transformer
 
     # Cython uses this method instead of the normal rich comparisons.
     def __richcmp__(self, other, op):
@@ -297,9 +382,15 @@ cdef class CRS:
         (x, y) in this coordinate system
 
         """
+
         cdef:
             double cx, cy
             int status
+        r = self.transformer(src_crs).coords(np.array([x, y]))
+        print('REL', r)
+        return r[0], r[1]
+
+
         cx = x
         cy = y
         if src_crs.is_geodetic():
