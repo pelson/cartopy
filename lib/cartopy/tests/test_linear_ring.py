@@ -203,3 +203,15 @@ def test_symmetric_geodesic():
     r1_coords = np.array(r1.geoms[0].coords)
     r2_coords = np.array(r2.geoms[0].coords)[::-1]
     assert_array_almost_equal(r1_coords, r2_coords)
+
+def test_symmetric_pc():
+    # Projected lines should be sampled at the same positions no matter
+    # the order of p0 and p1. Issue discussed at:
+    # https://github.com/SciTools/cartopy/issues/1039
+    verts = np.array([[80, 45], [73, 63], [50, 45]])
+    ls = sgeom.LineString(verts)
+    r1 = ccrs.Stereographic().project_geometry(sgeom.LineString(verts), ccrs.PlateCarree())
+    r2 = ccrs.Stereographic().project_geometry(sgeom.LineString(verts[::-1]), ccrs.PlateCarree())
+    r1_coords = np.array(r1.geoms[0].coords)
+    r2_coords = np.array(r2.geoms[0].coords)[::-1]
+    assert_array_almost_equal(r1_coords, r2_coords)

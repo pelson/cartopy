@@ -23,6 +23,7 @@ to project a `~shapely.geometry.LinearRing` / `~shapely.geometry.LineString`.
 In general, this should never be called manually, instead leaving the
 processing to be done by the :class:`cartopy.crs.Projection` subclasses.
 """
+from __future__ import print_function
 
 cimport cython
 from libc.math cimport HUGE_VAL, sqrt
@@ -32,7 +33,7 @@ from libcpp cimport bool
 from libcpp.list cimport list
 from libcpp.vector cimport vector
 
-cdef bool DEBUG = False
+cdef bool DEBUG = True
 
 cdef extern from "geos_c.h":
     ctypedef void *GEOSContextHandle_t
@@ -172,6 +173,24 @@ cdef class LineAccumulator:
 
     cdef list[Line].size_type size(self):
         return self.lines.size()
+
+    cdef list[Line].size_type current_line_len(self):
+        return self.lines.back().size()
+
+    cdef void reverse_since(self, size_t line_idx, size_t first_line_idx):
+        """
+        Reverse all lines created since the given line index.
+
+        >>> lines
+        [0, 2, 1], [6, 5], [4, 3]
+        >>> lines.reverse_lines_since(0, 1)
+        [0, 1, 2], [3, 4], [5, 6]
+        """
+        cdef list[Line] sub_lines = self.lines[line_idx+1:]
+        for line in self.lines[line_idx+1:]:
+            line.reverse()
+        cdef Line l = self.lines[line_idx-1:line_idx][0]
+        self.lines = self.lines[:line_idx] + [l] + sub_lines[::-1]
 
 
 cdef class Interpolator:
@@ -503,6 +522,13 @@ cdef void _project_segment(GEOSContextHandle_t handle,
     GEOSCoordSeq_getY_r(handle, src_coords, src_idx_from, &p_current.y)
     GEOSCoordSeq_getX_r(handle, src_coords, src_idx_to, &p_end.x)
     GEOSCoordSeq_getY_r(handle, src_coords, src_idx_to, &p_end.y)
+
+    cdef bool swap_start_end = False
+    swap_start_end = (p_end.x < p_current.x) or (p_end.x == p_current.x and p_end.y < p_current.y)
+
+    if swap_start_end:
+        p_current, p_end = p_end, p_current
+
     if DEBUG:
         print("Setting line:")
         print("   ", p_current.x, ", ", p_current.y)
@@ -520,6 +546,8 @@ cdef void _project_segment(GEOSContextHandle_t handle,
     state = get_state(p_current, gp_domain, handle)
 
     cdef size_t old_lines_size = lines.size()
+    cdef size_t old_line_idx = lines.current_line_len()
+
     while t_current < 1.0 and (lines.size() - old_lines_size) < 100:
         if DEBUG:
             print("Bisecting from: ", t_current, " (")
@@ -571,6 +599,9 @@ cdef void _project_segment(GEOSContextHandle_t handle,
             state = get_state(p_current, gp_domain, handle)
             if state == POINT_IN:
                 lines.new_line()
+
+    if swap_start_end:
+        lines.reverse_since(old_lines_size, old_line_idx)
 
 
 def project_linear(geometry not None, CRS src_crs not None,
