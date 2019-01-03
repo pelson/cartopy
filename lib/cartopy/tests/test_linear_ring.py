@@ -18,6 +18,7 @@
 from __future__ import (absolute_import, division, print_function)
 
 import numpy as np
+from numpy.testing import assert_array_almost_equal
 import pytest
 import shapely.geometry as sgeom
 
@@ -189,3 +190,16 @@ class TestMisc(object):
         # Test area of smallest Polygon that contains all the points in the
         # geometry.
         assert round(abs(mlinestr.convex_hull.area - 2347.75623076), 7) == 0
+
+
+def test_symmetric_geodesic():
+    # Geodesic lines should be sampled at the same positions no matter
+    # the order of p0 and p1. Issue discussed at:
+    # https://github.com/SciTools/cartopy/issues/1039
+    verts = np.array([[80, 45], [73, 63], [50, 45]])
+    ls = sgeom.LineString(verts)
+    r1 = ccrs.PlateCarree().project_geometry(sgeom.LineString(verts), ccrs.Geodetic())
+    r2 = ccrs.PlateCarree().project_geometry(sgeom.LineString(verts[::-1]), ccrs.Geodetic())
+    r1_coords = np.array(r1.geoms[0].coords)
+    r2_coords = np.array(r2.geoms[0].coords)[::-1]
+    assert_array_almost_equal(r1_coords, r2_coords)
