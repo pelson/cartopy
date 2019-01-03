@@ -131,12 +131,10 @@ cdef class Transformer:
 
     """
     cpdef coords(self, np.ndarray[np.float64_t] coords):
-        print('FOO: transform coords')
-
+        pass
 
 cdef class Proj4Transformer(Transformer):
     def __init__(self, str src, str dest):
-        print('CONSTRUCT:', src, dest)
         proj4_init_bytes = six.b(src)
         self.src_proj = pj_init_plus(proj4_init_bytes)
         if not self.src_proj:
@@ -149,17 +147,12 @@ cdef class Proj4Transformer(Transformer):
 
     cpdef coords(self, np.ndarray[np.float64_t] coords):
         cdef:
-            double cx, cy
+            double cx, cy, cz
             int status
         cx = coords[..., 0]
         cy = coords[..., 1]
-        print('INSIDE:', cx, cy)
-        # TODO: Remove this - perhaps make it another Transformer...
-        #if src_crs.is_geodetic():
-        #    cx *= DEG_TO_RAD
-        #    cy *= DEG_TO_RAD
-        status = pj_transform(self.src_proj, self.dest_proj, 1, 1, &cx, &cy, NULL);
-        print('FOO:', cx, cy)
+        cz = coords[..., 1]
+        status = pj_transform(self.src_proj, self.dest_proj, 1, 1, &cx, &cy, &cz);
         if status == -14 or status == -20:
             # -14 => "latitude or longitude exceeded limits"
             # -20 => "tolerance condition error"
@@ -167,14 +160,12 @@ cdef class Proj4Transformer(Transformer):
         elif status != 0:
             raise Proj4Error()
 
-        #if self.is_geodetic():
-        #    cx *= RAD_TO_DEG
-        #    cy *= RAD_TO_DEG
         return (cx, cy)
 
 
 cdef class RadiansInProj4Transformer(Proj4Transformer):
     cpdef coords(self, np.ndarray[np.float64_t] coords):
+        DEBUG = 0
         coords = coords * DEG_TO_RAD
         result = Proj4Transformer.coords(self, coords)
         return result
@@ -202,13 +193,8 @@ cdef class TwoStageTransformer(Transformer):
         self.inverse = inverse_transformer
         self.forward = forward_transformer
 
-    #cpdef coords(self, np.ndarray[np.float64_t] coords):
-    #    print("TWO")
-    #    a, b = self.inverse.coords(coords)
-    #    print(a, b)
-    #    r = self.forward.coords(np.array([a, b]))
-    #    print(r)
-    #    return r
+    cpdef coords(self, np.ndarray[np.float64_t] coords):
+        return self.forward.coords(np.array(self.inverse.coords(coords)))
 
 cdef class CRS:
     """
@@ -281,21 +267,37 @@ cdef class CRS:
         # Use the python form, not the C form. Gives us much easier
         # access to mutable initialisation.
         #cdef Transformer transformer
-#        if hasattr(self, '_prj_function'):
-#            inverse = Proj4Transformer(other.proj4_init, other.as_geodetic().proj4_init)
-#            forward = GenericTransformer(self._proj_function)
-#            transformer = TwoStageTransformer(inverse, forward)
-#        elif hasattr(other, '_prj_function_inverse'):
-#            # TODO: IMPLEMENT THIS
-#            inverse = Proj4Transformer(other.proj4_init, other.as_geodetic().proj4_init)
-#            forward = GenericTransformer(self._proj_function)
-#            transformer = TwoStageTransformer(inverse, forward)
 
-        if other.is_geodetic():
-        #elif other.is_geodetic():
+        source_crs = other
+
+        # TODO: Not currently handling the case where self and other both implement
+        # custom functions.
+
+        if hasattr(self, '_prj_function'):
+            # Conversion from projected to radians.
+            # new method? CRS.geodetic_transformer()
+            inverse = Proj4Transformer(other.proj4_init, other.as_geodetic().proj4_init)
+            if 'proj=eqc' in self.proj4_init or other.is_geodetic():
+                inverse = TwoStageTransformer(inverse, GenericTransformer(np.deg2rad))
+            # Conversion from radians to projected coordinates.
+            forward = GenericTransformer(self._prj_function)
+            transformer = TwoStageTransformer(inverse, forward)
+        elif hasattr(source_crs, '_prj_function_inverse'):
+            inverse = GenericTransformer(source_crs._prj_function_inverse)
+#            inverse = TwoStageTransformer(inverse, GenericTransformer(np.rad2deg))
+            forward = Proj4Transformer(self.as_geodetic().proj4_init, self.proj4_init)
+            if 'proj=eqc' in self.proj4_init:
+                forward = TwoStageTransformer(forward, GenericTransformer(np.deg2rad))
+            transformer = TwoStageTransformer(inverse, forward)
+            transformer = TwoStageTransformer(transformer, GenericTransformer(np.rad2deg))
+        elif other.is_geodetic():
+            # This exists for datum transformations. TODO: The natural optimisation would be 
+            # to check whether we actually need to do it based on the CRSes.
             transformer = RadiansInProj4Transformer(other.proj4_init, self.proj4_init)
         elif self.is_geodetic():
-            transformer = RadiansOutProj4Transformer(other.proj4_init, self.proj4_init)
+            transformer = Proj4Transformer(other.proj4_init, self.proj4_init)
+            transformer2 = TwoStageTransformer(transformer, GenericTransformer(np.rad2deg))
+            transformer = transformer2
         else:
             transformer = Proj4Transformer(other.proj4_init, self.proj4_init)
         return transformer
@@ -410,10 +412,9 @@ cdef class CRS:
         cdef:
             double cx, cy
             int status
-        r = self.transformer(src_crs).coords(np.array([x, y]))
-        print('REL', r)
-        return r[0], r[1]
 
+        r = self.transformer(src_crs).coords(np.array([x, y]))
+        return r[0], r[1]
 
         cx = x
         cy = y
@@ -489,8 +490,21 @@ cdef class CRS:
                                  'length')
 
         npts = x.shape[0]
-
         result = np.empty([npts, 3], dtype=np.double)
+
+        transformer = self.transformer(src_crs)
+        result[:, 0] = x
+        result[:, 1] = y
+        if z is not None:
+            result[:, 2] = z
+        else:
+            result = result[:, :2]
+
+        for i in range(npts):
+            r = transformer.coords(result[i])
+            result[i] = r
+        return result
+
         if src_crs.is_geodetic():
             result[:, 0] = np.deg2rad(x)
             result[:, 1] = np.deg2rad(y)

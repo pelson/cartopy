@@ -23,7 +23,7 @@ to project a `~shapely.geometry.LinearRing` / `~shapely.geometry.LineString`.
 In general, this should never be called manually, instead leaving the
 processing to be done by the :class:`cartopy.crs.Projection` subclasses.
 """
-from cartopy._crs cimport CRS
+from cartopy._crs cimport CRS, Transformer
 import numpy as np
 cimport numpy as np
 
@@ -182,10 +182,14 @@ cdef class Interpolator:
     cdef Point end
     cdef projPJ src_proj
     cdef projPJ dest_proj
+    cdef Transformer transformer
 
-    cdef void init(self, projPJ src_proj, projPJ dest_proj):
-        self.src_proj = src_proj
-        self.dest_proj = dest_proj
+    cdef void init(self, Transformer transformer):
+        self.transformer = transformer
+
+    cdef void geod_init(self, projPJ src_proj):
+        # TODO: Remove the need for this...
+        pass
 
     cdef void set_line(self, const Point &start, const Point &end):
         self.start = start
@@ -195,7 +199,15 @@ cdef class Interpolator:
         raise NotImplementedError
 
     cdef Point project(self, const Point &point):
-        raise NotImplementedError
+        cdef Point dest_xy
+        cdef projLP xy
+
+        xy.u = point.x
+        xy.v = point.y
+        result = self.transformer.coords(np.array([point.x, point.y], dtype=np.float64))
+        dest_xy.x = result[0]
+        dest_xy.y = result[1]
+        return dest_xy
 
 
 cdef class CartesianInterpolator(Interpolator):
@@ -205,37 +217,14 @@ cdef class CartesianInterpolator(Interpolator):
         xy.y = self.start.y + (self.end.y - self.start.y) * t
         return self.project(xy)
 
-    cdef Point project(self, const Point &src_xy):
-        cdef Point dest_xy
-        cdef projLP xy
-
-        xy.u = src_xy.x
-        xy.v = src_xy.y
-
-        cdef int status = pj_transform(self.src_proj, self.dest_proj,
-                                       1, 1, &xy.u, &xy.v, NULL)
-        if status in (-14, -20):
-            # -14 => "latitude or longitude exceeded limits"
-            # -20 => "tolerance condition error"
-            xy.u = xy.v = HUGE_VAL
-        elif status != 0:
-            raise Exception('pj_transform failed: %d\n%s' % (
-                status,
-                pj_strerrno(status)))
-
-        dest_xy.x = xy.u
-        dest_xy.y = xy.v
-        return dest_xy
-
 
 cdef class SphericalInterpolator(Interpolator):
     cdef geod_geodesic geod
     cdef geod_geodesicline geod_line
     cdef double a13
 
-    cdef void init(self, projPJ src_proj, projPJ dest_proj):
+    cdef void geod_init(self, projPJ src_proj):
         self.src_proj = src_proj
-        self.dest_proj = dest_proj
 
         cdef double major_axis
         cdef double eccentricity_squared
@@ -258,28 +247,6 @@ cdef class SphericalInterpolator(Interpolator):
                          NULL)
 
         return self.project(lonlat)
-
-    cdef Point project(self, const Point &lonlat):
-        cdef Point xy
-        cdef projLP dest
-
-        dest.u = lonlat.x * DEG_TO_RAD
-        dest.v = lonlat.y * DEG_TO_RAD
-
-        cdef int status = pj_transform(self.src_proj, self.dest_proj,
-                                       1, 1, &dest.u, &dest.v, NULL)
-        if status in (-14, -20):
-            # -14 => "latitude or longitude exceeded limits"
-            # -20 => "tolerance condition error"
-            dest.u = dest.v = HUGE_VAL
-        elif status != 0:
-            raise Exception('pj_transform failed: %d\n%s' % (
-                status,
-                pj_strerrno(status)))
-
-        xy.x = dest.u
-        xy.y = dest.v
-        return xy
 
 
 cdef enum State:
@@ -611,11 +578,14 @@ def project_linear(geometry not None, CRS src_crs not None,
 
     g_domain = geos_from_shapely(dest_projection.domain)
 
+    cdef Transformer transformer = dest_projection.transformer(src_crs)
+
     if src_crs.is_geodetic():
         interpolator = SphericalInterpolator()
     else:
         interpolator = CartesianInterpolator()
-    interpolator.init(src_crs.proj4, (<CRS>dest_projection).proj4)
+    interpolator.init(transformer)
+    interpolator.geod_init(src_crs.proj4)
 
     src_coords = GEOSGeom_getCoordSeq_r(handle, g_linear)
     gp_domain = GEOSPrepare_r(handle, g_domain)

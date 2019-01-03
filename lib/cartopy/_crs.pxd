@@ -21,6 +21,7 @@ from ._proj4 cimport projPJ
 
 
 cdef class Transformer:
+    cdef object callback
     cpdef coords(self, np.ndarray[np.float64_t] coords)
 
 
@@ -28,9 +29,16 @@ cdef class Proj4Transformer(Transformer):
     cdef projPJ src_proj
     cdef projPJ dest_proj
 
-#cdef class TwoStageTransformer(Transformer):
-#    cdef Transformer inverse
-#    cdef Transformer forward
+
+cdef class RadiansOutProj4Transformer(Proj4Transformer):
+    pass
+
+cdef class RadiansInProj4Transformer(Proj4Transformer):
+    pass
+
+cdef class TwoStageTransformer(Transformer):
+    cdef Transformer inverse
+    cdef Transformer forward
 
 
 cdef class CRS:
