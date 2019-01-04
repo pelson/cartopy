@@ -147,7 +147,7 @@ cdef class LineAccumulator:
 
     cdef void add_point_if_empty(self, const Point &point):
         if self.lines.back().empty():
-            self.add_point(point)
+            self.add_point_to_end(point)
 
     cdef void add_point_if_not_exist(self, const Point &point):
         if self.lines.back().size() == 0 or pt_ne(point, dereference(self.last_added_point)):
@@ -166,7 +166,10 @@ cdef class LineAccumulator:
         if self.lines.size() > 1:
             first = self.lines.front().front()
             last = self.lines.back().back()
+            #last = dereference(self.last_added_point)
+            print('CUT?:', [[int(pt.x) for pt in line] for line in self.lines])
             if close(first.x, last.x) and close(first.y, last.y):
+                print('YEP')
                 self.lines.front().pop_front()
                 self.lines.back().splice(self.lines.back().end(),
                                          self.lines.front())
@@ -618,6 +621,7 @@ cdef void _project_segment(GEOSContextHandle_t handle,
 
         if state == POINT_IN:
             lines.add_point_if_not_exist(p_current)
+            #lines.add_point_if_empty(p_current)
             if t_min != t_current:
                 add_point(lines, p_min)
                 t_current = t_min

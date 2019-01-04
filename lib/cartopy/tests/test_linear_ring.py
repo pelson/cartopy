@@ -205,6 +205,21 @@ def test_symmetric_geodesic():
     r2_coords = np.array(r2.geoms[0].coords)[::-1]
     assert_array_almost_equal(r1_coords, r2_coords)
 
+def test_symmetric_geodesic_closed_cut():
+    # IGH cuts this geodetic geometry into multiple. Assert it produces the same thing no matter the order
+    verts = np.array([[-20, 45], [-60, 60], [-40, 45], [-20, 45]])
+    ls = sgeom.LineString(verts)
+    r1 = ccrs.PlateCarree().project_geometry(sgeom.LineString(verts), ccrs.Geodetic())
+    r2 = ccrs.PlateCarree().project_geometry(sgeom.LineString(verts[::-1]), ccrs.Geodetic())
+    print([list(geom.coords) for geom in r1.geoms])
+    for g1, g2 in zip(r1.geoms, r2.geoms):
+
+        r1_coords = np.array(g1.coords)
+        r2_coords = np.array(g2.coords)[::-1]
+        assert_array_almost_equal(r1_coords, r2_coords)
+    assert False
+
+
 def test_symmetric_pc():
     # Projected lines should be sampled at the same positions no matter
     # the order of p0 and p1. Issue discussed at:
