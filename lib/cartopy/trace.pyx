@@ -26,6 +26,7 @@ processing to be done by the :class:`cartopy.crs.Projection` subclasses.
 from __future__ import print_function
 
 cimport cython
+from cython.operator cimport dereference, preincrement
 from libc.math cimport HUGE_VAL, sqrt
 from numpy.math cimport isfinite, isnan
 from libc.stdint cimport uintptr_t as ptr
@@ -33,7 +34,7 @@ from libcpp cimport bool
 from libcpp.list cimport list
 from libcpp.vector cimport vector
 
-cdef bool DEBUG = True
+cdef bool DEBUG = False
 
 cdef extern from "geos_c.h":
     ctypedef void *GEOSContextHandle_t
@@ -100,6 +101,13 @@ ctypedef struct Point:
     double x
     double y
 
+
+cdef bool pt_eq(const Point &p1, const Point &p2):
+    return p1.x==p2.x and p1.y == p2.y
+
+cdef bool pt_ne(const Point &p1, const Point &p2):
+    return ~pt_eq(p1, p2)
+
 ctypedef list[Point] Line
 
 
@@ -124,21 +132,28 @@ cdef class LineAccumulator:
         self.lines.push_back(line)
         self.last_added_point = self.lines.back().end()
 
+    cdef void move_to_end(self):
+        self.last_added_point = self.lines.back().end()
+
     cdef void add_point(self, const Point &point):
         # Insert the point before the last added point, and track the newly added point location.
         self.last_added_point = self.lines.back().insert(self.last_added_point, point)
+        #print('GROW:', [int(pt.x) for pt in self.lines.back()])
 
     cdef void add_point_to_end(self, const Point &point):
         # Add the point to the end of the line. No need to update self.last_added_point.
-        self.lines.back().push_back(point)
+        self.last_added_point = self.lines.back().insert(self.lines.back().end(), point)
+        #print('GROW:', [int(pt.x) for pt in self.lines.back()])
 
     cdef void add_point_if_empty(self, const Point &point):
         if self.lines.back().empty():
             self.add_point(point)
 
+    cdef void add_point_if_not_exist(self, const Point &point):
+        if self.lines.back().size() == 0 or pt_ne(point, dereference(self.last_added_point)):
+            self.add_point(point)
+
     cdef GEOSGeometry *as_geom(self, GEOSContextHandle_t handle):
-        print('DONE:', self.lines)
-        from cython.operator cimport dereference, preincrement
         # self.lines.remove_if(degenerate_line) is not available in Cython.
         cdef list[Line].iterator it = self.lines.begin()
         while it != self.lines.end():
@@ -528,6 +543,8 @@ cdef void _project_segment(GEOSContextHandle_t handle,
                            Interpolator interpolator,
                            const GEOSPreparedGeometry *gp_domain,
                            double threshold, LineAccumulator lines):
+    cdef bool DEBUG = False
+
     cdef Point p_current, p_min, p_max, p_end
     cdef double t_current, t_min, t_max
     cdef State state
@@ -547,15 +564,17 @@ cdef void _project_segment(GEOSContextHandle_t handle,
 #    cdef void add_point(self, const Point &point) add_point
 
     if swap_start_end:
-        print('SWAP:', p_current, p_end)
+        if DEBUG: print('SWAP:', p_end, p_current)
         p_current, p_end = p_end, p_current
         #lines.prepare_reverse_iterator()
         #add_point = lines.add_point_at_iterator
         add_point = lines.add_point
         new_line = lines.new_line
     else:
+        if DEBUG: print('STRAIGHT:', p_current, p_end)
         add_point = lines.add_point_to_end
         new_line = lines.new_line   #_to_end
+    lines.move_to_end()
 
     if DEBUG:
         print("Setting line:")
@@ -598,7 +617,7 @@ cdef void _project_segment(GEOSContextHandle_t handle,
                   p_max.x, ", ", p_max.y, ")")
 
         if state == POINT_IN:
-            lines.add_point_if_empty(p_current)
+            lines.add_point_if_not_exist(p_current)
             if t_min != t_current:
                 add_point(lines, p_min)
                 t_current = t_min
