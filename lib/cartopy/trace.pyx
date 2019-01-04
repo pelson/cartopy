@@ -34,7 +34,7 @@ from libcpp cimport bool
 from libcpp.list cimport list
 from libcpp.vector cimport vector
 
-cdef bool DEBUG = False
+cdef bool DEBUG = True
 
 cdef extern from "geos_c.h":
     ctypedef void *GEOSContextHandle_t
@@ -105,6 +105,10 @@ ctypedef struct Point:
 cdef bool pt_eq(const Point &p1, const Point &p2):
     return p1.x==p2.x and p1.y == p2.y
 
+cdef bool pt_close(const Point &p1, const Point &p2):
+    return close(p1.x, p2.x) and close(p1.y, p2.y)
+
+
 cdef bool pt_ne(const Point &p1, const Point &p2):
     return ~pt_eq(p1, p2)
 
@@ -127,6 +131,9 @@ cdef class LineAccumulator:
     def __init__(self):
         self.new_line()
 
+    cpdef to_list(self):
+        return self.lines # list([list(line) for line in self.lines])
+
     cdef void new_line(self):
         cdef Line line
         self.lines.push_back(line)
@@ -147,10 +154,12 @@ cdef class LineAccumulator:
 
     cdef void add_point_if_empty(self, const Point &point):
         if self.lines.back().empty():
+            print('EMPTY, so adding:', point)
             self.add_point_to_end(point)
 
     cdef void add_point_if_not_exist(self, const Point &point):
-        if self.lines.back().size() == 0 or pt_ne(point, dereference(self.last_added_point)):
+        if self.lines.back().size() == 0 or not pt_close(point, dereference(self.last_added_point)):
+            print('NOT EQUAL, so adding:', point, dereference(self.last_added_point))
             self.add_point(point)
 
     cdef GEOSGeometry *as_geom(self, GEOSContextHandle_t handle):
@@ -199,28 +208,6 @@ cdef class LineAccumulator:
 
     cdef list[Line].size_type size(self):
         return self.lines.size()
-
-    cdef list[Line].size_type current_line_len(self):
-        return self.lines.back().size()
-
-    cdef void reverse_since(self, size_t line_idx, size_t first_line_idx):
-        """
-        Reverse all lines created since the given line index.
-
-        >>> lines
-        [0, 2, 1], [6, 5], [4, 3]
-        >>> lines.reverse_lines_since(0, 1)
-        [0, 1, 2], [3, 4], [5, 6]
-        """
-        for i, line in enumerate(self.lines):
-            if i > line_idx:
-                line.reverse()
-
-        #cdef list[Line] sub_lines = self.lines[line_idx+1:]
-        #for line in self.lines[line_idx+1:]:
-        #    line.reverse()
-        #cdef Line l = self.lines[line_idx-1:line_idx][0]
-        #self.lines = self.lines[:line_idx] + [l] + sub_lines[::-1]
 
 
 cdef class Interpolator:
@@ -489,6 +476,15 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
                  const GEOSPreparedGeometry *gp_domain, const State &state,
                  Interpolator interpolator, double threshold,
                  double &t_min, Point &p_min, double &t_max, Point &p_max):
+    """
+    Iterate along the given line, starting at t_start, until we either reach a cut, or the end (t=1).
+
+    Calling code will want to check if t=0 at the end, and may choose to call the routine again with
+    t_start set to the previous result.
+
+    This implementation updates the given t_min, p_min, t_max and p_max.
+
+    """
     cdef double t_current
     cdef Point p_current
     cdef bool valid
@@ -527,6 +523,8 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
         if DEBUG and False:
             print("   => valid: ", valid)
 
+        # If the second half of the bisection is the valid one, move the minimum t on to the current one.
+        # Else, bring the maximum t back.
         if valid:
             (&t_min)[0] = t_current
             (&p_min)[0] = p_current
@@ -559,12 +557,9 @@ cdef void _project_segment(GEOSContextHandle_t handle,
 
     cdef bool swap_start_end = False
     swap_start_end = (p_end.x < p_current.x) or (p_end.x == p_current.x and p_end.y < p_current.y)
-#    swap_start_end = False
 
     cdef ADD_POINT_FUNC add_point
     cdef NEW_LINE_FUNC new_line
-
-#    cdef void add_point(self, const Point &point) add_point
 
     if swap_start_end:
         if DEBUG: print('SWAP:', p_end, p_current)
@@ -577,6 +572,7 @@ cdef void _project_segment(GEOSContextHandle_t handle,
         if DEBUG: print('STRAIGHT:', p_current, p_end)
         add_point = lines.add_point_to_end
         new_line = lines.new_line   #_to_end
+    # All lines should accumulate at the end. Some may prepend, other append, but in all cases, it is from the end.
     lines.move_to_end()
 
     if DEBUG:
@@ -596,7 +592,8 @@ cdef void _project_segment(GEOSContextHandle_t handle,
     state = get_state(p_current, gp_domain, handle)
 
     cdef size_t old_lines_size = lines.size()
-    cdef size_t old_line_idx = lines.current_line_len()
+
+    lines.add_point_if_not_exist(p_current)
 
     while t_current < 1.0 and (lines.size() - old_lines_size) < 100:
         if DEBUG:
@@ -618,19 +615,28 @@ cdef void _project_segment(GEOSContextHandle_t handle,
             print("   => ", t_min, "to", t_max)
             print("   => (", p_min.x, ", ", p_min.y, ") to (",
                   p_max.x, ", ", p_max.y, ")")
-
+        # State relates to p_current *before* bisect was called.
         if state == POINT_IN:
-            lines.add_point_if_not_exist(p_current)
+            # The p_ point is valid for this line, so make sure it
+            # exists as a vertiex. If the next point is valid
+#            lines.add_point_if_not_exist(p_current)
             #lines.add_point_if_empty(p_current)
-            if t_min != t_current:
+            
+            if t_min < t_current < t_max:
+                # Put the min point (before the p_current one?).
                 add_point(lines, p_min)
                 t_current = t_min
                 p_current = p_min
             else:
                 t_current = t_max
                 p_current = p_max
+                # Now check whether p_max is a valid point. If it is we should add it too.
                 state = get_state(p_current, gp_domain, handle)
                 if state == POINT_IN:
+                    # Both t_min and t_max are inside the domain, but they don't fall
+                    # on a valid straight line. There are therefore separate lines.
+                    # (It isn't clear why t_min == t_current tells us this.)
+                    print('STARTING A NEW LINE: IN IN. WHY?', t_current)
                     lines.new_line()
 
         elif state == POINT_OUT:
@@ -651,8 +657,8 @@ cdef void _project_segment(GEOSContextHandle_t handle,
             if state == POINT_IN:
                 lines.new_line()
 
-#    if swap_start_end and state == POINT_IN:
-#        add_point(lines, p_max)
+    lines.add_point_if_not_exist(p_current)
+
 
 def project_linear(geometry not None, CRS src_crs not None,
                    dest_projection not None):
@@ -712,3 +718,54 @@ def project_linear(geometry not None, CRS src_crs not None,
     del lines, interpolator
     multi_line_string = shapely_from_geos(g_multi_line_string)
     return multi_line_string
+
+class _Testing:
+    @staticmethod
+    def _call_project_segment(
+            geometry, CRS src_crs not None,
+            dest_projection not None, existing_lines=None):
+        # NOT PUBLIC API - this is purely for simpler testing of _project_segment.
+        # Pretty much a wholesale copy&pasta from project_geometry
+        cdef:
+            double threshold = dest_projection.threshold
+            GEOSContextHandle_t handle = get_geos_context_handle()
+            GEOSGeometry *g_linear = geos_from_shapely(geometry)
+            Interpolator interpolator
+            GEOSGeometry *g_domain
+            const GEOSCoordSequence *src_coords
+            unsigned int src_size, src_idx
+            const GEOSPreparedGeometry *gp_domain
+            LineAccumulator lines
+            GEOSGeometry *g_multi_line_string
+
+        g_domain = geos_from_shapely(dest_projection.domain)
+
+        if src_crs.is_geodetic():
+            interpolator = SphericalInterpolator()
+        else:
+            interpolator = CartesianInterpolator()
+        interpolator.init(src_crs.proj4, (<CRS>dest_projection).proj4)
+
+        src_coords = GEOSGeom_getCoordSeq_r(handle, g_linear)
+        gp_domain = GEOSPrepare_r(handle, g_domain)
+
+        GEOSCoordSeq_getSize_r(handle, src_coords, &src_size)  # check exceptions
+
+        lines = LineAccumulator()
+        if existing_lines:
+            first = True
+            for line in existing_lines:
+                if not first:
+                    lines.new_line()
+                    first = False
+                for pt in line:
+                    print('ADDING:', pt, interpolator.project(pt))
+                    lines.add_point_to_end(interpolator.project(pt))
+
+        for src_idx in range(1, src_size):
+            _project_segment(handle, src_coords, src_idx - 1, src_idx,
+                             interpolator, gp_domain, threshold, lines);
+
+        GEOSPreparedGeom_destroy_r(handle, gp_domain)
+
+        return lines.to_list()

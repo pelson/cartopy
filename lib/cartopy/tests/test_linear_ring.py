@@ -219,6 +219,15 @@ def test_symmetric_geodesic_closed_cut():
         assert_array_almost_equal(r1_coords, r2_coords)
     assert False
 
+def test_project_segment():
+    # IGH cuts this geodetic geometry into multiple. Assert it produces the same thing no matter the order
+    verts = np.array([[-20, 45], [-60, 60], [-40, 45], [-20, 45]])
+    ls = sgeom.LineString(verts[:2])
+    import cartopy.trace
+    r = cartopy.trace._call_project_segment(ls, ccrs.Geodetic(), ccrs.InterruptedGoodeHomolosine())
+    r = cartopy.trace._call_project_segment(ls, ccrs.Geodetic(), ccrs.InterruptedGoodeHomolosine(), [[{'x': 1, 'y': 2}]])
+    assert r == 1
+    assert 1 == 2
 
 def test_symmetric_pc():
     # Projected lines should be sampled at the same positions no matter
