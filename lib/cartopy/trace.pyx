@@ -114,6 +114,7 @@ cdef bool close(double a, double b):
 @cython.final
 cdef class LineAccumulator:
     cdef list[Line] lines
+    cdef list[Point].iterator last_added_point
 
     def __init__(self):
         self.new_line()
@@ -121,8 +122,14 @@ cdef class LineAccumulator:
     cdef void new_line(self):
         cdef Line line
         self.lines.push_back(line)
+        self.last_added_point = self.lines.back().end()
 
     cdef void add_point(self, const Point &point):
+        # Insert the point before the last added point, and track the newly added point location.
+        self.last_added_point = self.lines.back().insert(self.last_added_point, point)
+
+    cdef void add_point_to_end(self, const Point &point):
+        # Add the point to the end of the line. No need to update self.last_added_point.
         self.lines.back().push_back(point)
 
     cdef void add_point_if_empty(self, const Point &point):
@@ -130,6 +137,7 @@ cdef class LineAccumulator:
             self.add_point(point)
 
     cdef GEOSGeometry *as_geom(self, GEOSContextHandle_t handle):
+        print('DONE:', self.lines)
         from cython.operator cimport dereference, preincrement
         # self.lines.remove_if(degenerate_line) is not available in Cython.
         cdef list[Line].iterator it = self.lines.begin()
@@ -186,11 +194,15 @@ cdef class LineAccumulator:
         >>> lines.reverse_lines_since(0, 1)
         [0, 1, 2], [3, 4], [5, 6]
         """
-        cdef list[Line] sub_lines = self.lines[line_idx+1:]
-        for line in self.lines[line_idx+1:]:
-            line.reverse()
-        cdef Line l = self.lines[line_idx-1:line_idx][0]
-        self.lines = self.lines[:line_idx] + [l] + sub_lines[::-1]
+        for i, line in enumerate(self.lines):
+            if i > line_idx:
+                line.reverse()
+
+        #cdef list[Line] sub_lines = self.lines[line_idx+1:]
+        #for line in self.lines[line_idx+1:]:
+        #    line.reverse()
+        #cdef Line l = self.lines[line_idx-1:line_idx][0]
+        #self.lines = self.lines[:line_idx] + [l] + sub_lines[::-1]
 
 
 cdef class Interpolator:
@@ -477,7 +489,7 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
     # projected coordinates - e.g. the resulting line length.
 
     while abs(t_max - t_min) > 1.0e-6:
-        if DEBUG:
+        if DEBUG and False:
             print("t: ", t_current)
 
         if state == POINT_IN:
@@ -494,7 +506,7 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
         else:
             valid = not isfinite(p_current.x) or not isfinite(p_current.y)
 
-        if DEBUG:
+        if DEBUG and False:
             print("   => valid: ", valid)
 
         if valid:
@@ -508,6 +520,8 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
         p_current = interpolator.interpolate(t_current)
 
 
+ctypedef void (*ADD_POINT_FUNC)(LineAccumulator, const Point &)
+ctypedef void (*NEW_LINE_FUNC)(LineAccumulator)
 cdef void _project_segment(GEOSContextHandle_t handle,
                            const GEOSCoordSequence *src_coords,
                            unsigned int src_idx_from, unsigned int src_idx_to,
@@ -525,9 +539,23 @@ cdef void _project_segment(GEOSContextHandle_t handle,
 
     cdef bool swap_start_end = False
     swap_start_end = (p_end.x < p_current.x) or (p_end.x == p_current.x and p_end.y < p_current.y)
+#    swap_start_end = False
+
+    cdef ADD_POINT_FUNC add_point
+    cdef NEW_LINE_FUNC new_line
+
+#    cdef void add_point(self, const Point &point) add_point
 
     if swap_start_end:
+        print('SWAP:', p_current, p_end)
         p_current, p_end = p_end, p_current
+        #lines.prepare_reverse_iterator()
+        #add_point = lines.add_point_at_iterator
+        add_point = lines.add_point
+        new_line = lines.new_line
+    else:
+        add_point = lines.add_point_to_end
+        new_line = lines.new_line   #_to_end
 
     if DEBUG:
         print("Setting line:")
@@ -572,7 +600,7 @@ cdef void _project_segment(GEOSContextHandle_t handle,
         if state == POINT_IN:
             lines.add_point_if_empty(p_current)
             if t_min != t_current:
-                lines.add_point(p_min)
+                add_point(lines, p_min)
                 t_current = t_min
                 p_current = p_min
             else:
@@ -600,9 +628,8 @@ cdef void _project_segment(GEOSContextHandle_t handle,
             if state == POINT_IN:
                 lines.new_line()
 
-    if swap_start_end:
-        lines.reverse_since(old_lines_size, old_line_idx)
-
+#    if swap_start_end and state == POINT_IN:
+#        add_point(lines, p_max)
 
 def project_linear(geometry not None, CRS src_crs not None,
                    dest_projection not None):

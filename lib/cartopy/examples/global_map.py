@@ -23,11 +23,12 @@ def main():
     ax.set_global()
 
     ax.stock_img()
-    ax.coastlines()
+    #ax.coastlines()
 
     ax.plot(-0.08, 51.53, 'o', transform=ccrs.PlateCarree())
     ax.plot([-0.08, 132], [51.53, 43.17], transform=ccrs.PlateCarree())
     ax.plot([-0.08, 132], [51.53, 43.17], transform=ccrs.Geodetic())
+    ax.plot([132, -0.08, 132], [43.17, 51.53, 43.17], transform=ccrs.Geodetic())
 
     plt.show()
 

@@ -197,6 +197,7 @@ def test_symmetric_geodesic():
     # the order of p0 and p1. Issue discussed at:
     # https://github.com/SciTools/cartopy/issues/1039
     verts = np.array([[80, 45], [73, 63], [50, 45]])
+    verts = np.array([[80, 45], [73, 63], [50, 45]])
     ls = sgeom.LineString(verts)
     r1 = ccrs.PlateCarree().project_geometry(sgeom.LineString(verts), ccrs.Geodetic())
     r2 = ccrs.PlateCarree().project_geometry(sgeom.LineString(verts[::-1]), ccrs.Geodetic())
