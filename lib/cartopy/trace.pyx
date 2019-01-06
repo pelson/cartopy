@@ -120,7 +120,15 @@ cdef class LineAccumulator:
 
     cdef void new_line(self):
         cdef Line line
-        self.lines.push_back(line)
+        if not self.lines.size() or self.lines.back().size() > 0:
+            self.lines.push_back(line)
+
+    cdef void line_end(self):
+        self.new_line()
+
+    cdef void line_start(self, const Point &point):
+        self.new_line()
+        self.add_point(point)
 
     cdef void add_point(self, const Point &point):
         self.lines.back().push_back(point)
@@ -520,6 +528,8 @@ cdef void _project_segment(GEOSContextHandle_t handle,
     t_current = 0.0
     state = get_state(p_current, gp_domain, handle)
 
+    lines.add_point_if_empty(p_current)
+
     cdef size_t old_lines_size = lines.size()
     while t_current < 1.0 and (lines.size() - old_lines_size) < 100:
         if DEBUG:
@@ -543,7 +553,6 @@ cdef void _project_segment(GEOSContextHandle_t handle,
                   p_max.x, ", ", p_max.y, ")")
 
         if state == POINT_IN:
-            lines.add_point_if_empty(p_current)
             if t_min != t_current:
                 lines.add_point(p_min)
                 t_current = t_min
@@ -553,7 +562,7 @@ cdef void _project_segment(GEOSContextHandle_t handle,
                 p_current = p_max
                 state = get_state(p_current, gp_domain, handle)
                 if state == POINT_IN:
-                    lines.new_line()
+                    lines.line_start(p_current)
 
         elif state == POINT_OUT:
             if t_min != t_current:
@@ -564,14 +573,14 @@ cdef void _project_segment(GEOSContextHandle_t handle,
                 p_current = p_max
                 state = get_state(p_current, gp_domain, handle)
                 if state == POINT_IN:
-                    lines.new_line()
+                    lines.line_start(p_current)
 
         else:
             t_current = t_max
             p_current = p_max
             state = get_state(p_current, gp_domain, handle)
             if state == POINT_IN:
-                lines.new_line()
+                lines.line_start(p_current)
 
 
 cdef _interpolator(CRS src_crs, CRS dest_projection):
