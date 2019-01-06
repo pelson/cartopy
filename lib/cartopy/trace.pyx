@@ -33,7 +33,7 @@ from libcpp cimport bool
 from libcpp.list cimport list
 from libcpp.vector cimport vector
 
-cdef bool DEBUG = False
+cdef bool DEBUG = True
 
 cdef extern from "geos_c.h":
     ctypedef void *GEOSContextHandle_t
@@ -444,7 +444,7 @@ cdef bool straightAndDomain(double t_start, const Point &p_start,
     return valid
 
 
-cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
+cdef void bisect(const double t_start, const Point &p_start, const double t_end, const Point &p_end,
                  GEOSContextHandle_t handle,
                  const GEOSPreparedGeometry *gp_domain, const State &state,
                  Interpolator interpolator, double threshold,
@@ -453,13 +453,17 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
     cdef Point p_current
     cdef bool valid
 
+    cdef bool BISECT_DEBUG = False
+
     # Initialise our bisection range to the start and end points.
     (&t_min)[0] = t_start
     (&p_min)[0] = p_start
-    (&t_max)[0] = 1.0
+    (&t_max)[0] = t_end
     (&p_max)[0] = p_end
 
-    # Start the search at the end.
+    # Start the search at the end, there is a good chance it will
+    # be a good guess. If it is good, the t_min and t_max bounds
+    # will converge after one iteration.
     t_current = t_max
     p_current = p_max
 
@@ -467,9 +471,6 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
     # projected coordinates - e.g. the resulting line length.
 
     while abs(t_max - t_min) > 1.0e-6:
-        if DEBUG:
-            print("t: ", t_current)
-
         if state == POINT_IN:
             # Straight and entirely-inside-domain
             valid = straightAndDomain(t_start, p_start, t_current, p_current,
@@ -484,8 +485,8 @@ cdef void bisect(double t_start, const Point &p_start, const Point &p_end,
         else:
             valid = not isfinite(p_current.x) or not isfinite(p_current.y)
 
-        if DEBUG:
-            print("   => valid: ", valid)
+        if BISECT_DEBUG:
+            print("t: {} {}   => {}valid: ".format('✔' if valid else '✖', t_current, 'not ' if not valid else ''))
 
         if valid:
             (&t_min)[0] = t_current
@@ -512,45 +513,51 @@ cdef void _project_segment(GEOSContextHandle_t handle,
     GEOSCoordSeq_getY_r(handle, src_coords, src_idx_from, &p_current.y)
     GEOSCoordSeq_getX_r(handle, src_coords, src_idx_to, &p_end.x)
     GEOSCoordSeq_getY_r(handle, src_coords, src_idx_to, &p_end.y)
+
     if DEBUG:
-        print("Setting line:")
-        print("   ", p_current.x, ", ", p_current.y)
-        print("   ", p_end.x, ", ", p_end.y)
+        def p_str(point):
+            return '({}, {})'.format(point['x'], point['y'])
+        print("‖ Setting line between {} and {}".format(p_str(p_current), p_str(p_end)))
 
     interpolator.set_line(p_current, p_end)
     p_current = interpolator.project(p_current)
     p_end = interpolator.project(p_end)
-    if DEBUG:
-        print("Projected as:")
-        print("   ", p_current.x, ", ", p_current.y)
-        print("   ", p_end.x, ", ", p_end.y)
 
-    t_current = 0.0
+    if DEBUG:
+        print("  ⤻ Projected is between {} and {}".format(p_str(p_current), p_str(p_end)))
+
+    cdef bool reverse = False
+    reverse = (p_end.x < p_current.x) or (p_end.x == p_current.x and p_end.y < p_current.y)
+
+    if reverse:
+        # Actually, the end of the line should be at the beginning.
+        p_end, p_current = p_current, p_end
+        t_end = 0.0
+        t_current = 1.0
+    else:
+        t_current = 0.0
+        t_end = 1.0
+
     state = get_state(p_current, gp_domain, handle)
 
     lines.add_point_if_empty(p_current)
 
     cdef size_t old_lines_size = lines.size()
-    while t_current < 1.0 and (lines.size() - old_lines_size) < 100:
+    cdef bool first = True
+    while first or 0.0 < t_current < 1.0 and (lines.size() - old_lines_size) < 100:
+        first = False
         if DEBUG:
-            print("Bisecting from: ", t_current, " (")
-            if state == POINT_IN:
-                print("IN")
-            elif state == POINT_OUT:
-                print("OUT")
-            else:
-                print("NAN")
-            print(")")
-            print("   ", p_current.x, ", ", p_current.y)
-            print("   ", p_end.x, ", ", p_end.y)
+            state_str = {POINT_IN: 'inside', POINT_OUT: 'outside'}.get(state, 'NAN')
+            print("🔍 Bisection range {} ({}) -> {}".format(t_current, state_str, t_end))
 
-        bisect(t_current, p_current, p_end, handle, gp_domain, state,
+        bisect(t_current, p_current, t_end, p_end, handle, gp_domain, state,
                interpolator, threshold,
                t_min, p_min, t_max, p_max)
         if DEBUG:
-            print("   => ", t_min, "to", t_max)
-            print("   => (", p_min.x, ", ", p_min.y, ") to (",
-                  p_max.x, ", ", p_max.y, ")")
+            if t_min == t_max:
+                print("  * t={} {}".format(t_min, p_str(p_min)))
+            else:
+                print("  * t between {} and {} => {} {}".format(t_min, t_max, p_str(p_min), p_str(p_max)))
 
         if state == POINT_IN:
             if t_min != t_current:
@@ -581,6 +588,12 @@ cdef void _project_segment(GEOSContextHandle_t handle,
             state = get_state(p_current, gp_domain, handle)
             if state == POINT_IN:
                 lines.line_start(p_current)
+    if t_current != t_end:
+        print("DIDN'T QUITE MAKE IT> {}, {}".format(t_current, t_end))
+        if reverse:
+            # Potentially stitch the last created line to the one that existed
+            # before starting this segment.
+            pass
 
 
 cdef _interpolator(CRS src_crs, CRS dest_projection):
