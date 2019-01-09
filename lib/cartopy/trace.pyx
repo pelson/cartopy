@@ -60,7 +60,7 @@ cdef extern from "geos_c.h":
 
 from cartopy._crs cimport CRS
 from ._proj4 cimport (projPJ, projLP, pj_get_spheroid_defn, pj_transform,
-                      pj_strerrno, DEG_TO_RAD)
+                      pj_strerrno, DEG_TO_RAD, RAD_TO_DEG)
 from .geodesic._geodesic cimport (geod_geodesic, geod_geodesicline,
                                   geod_init, geod_geninverse,
                                   geod_lineinit, geod_genposition,
@@ -194,6 +194,9 @@ cdef class Interpolator:
     cdef Point project(self, const Point &point):
         raise NotImplementedError
 
+    cdef Point inverse(self, const Point &point):
+        raise NotImplementedError
+
 
 cdef class CartesianInterpolator(Interpolator):
     cdef Point interpolate(self, double t):
@@ -223,6 +226,30 @@ cdef class CartesianInterpolator(Interpolator):
         dest_xy.x = xy.u
         dest_xy.y = xy.v
         return dest_xy
+
+    cdef Point inverse(self, const Point &src_xy):
+        # NOTE THIS IS JUST A COPY AND PASTA OF PROJECT, only with dest and src swapped.
+        cdef Point dest_xy
+        cdef projLP xy
+
+        xy.u = src_xy.x
+        xy.v = src_xy.y
+
+        cdef int status = pj_transform(self.dest_proj, self.src_proj,
+                                       1, 1, &xy.u, &xy.v, NULL)
+        if status in (-14, -20):
+            # -14 => "latitude or longitude exceeded limits"
+            # -20 => "tolerance condition error"
+            xy.u = xy.v = HUGE_VAL
+        elif status != 0:
+            raise Exception('pj_transform failed: %d\n%s' % (
+                status,
+                pj_strerrno(status)))
+
+        dest_xy.x = xy.u
+        dest_xy.y = xy.v
+        return dest_xy
+
 
 
 cdef class SphericalInterpolator(Interpolator):
@@ -276,6 +303,31 @@ cdef class SphericalInterpolator(Interpolator):
 
         xy.x = dest.u
         xy.y = dest.v
+        return xy
+
+    cdef Point inverse(self, const Point &lonlat):
+        # NOTE THIS IS JUST A COPY AND PASTA OF PROJECT, only with dest and src swapped.
+
+        cdef Point xy
+        cdef projLP dest
+
+        dest.u = lonlat.x
+        dest.v = lonlat.y
+
+        cdef int status = pj_transform(self.dest_proj, self.src_proj,
+                                       1, 1, &dest.u, &dest.v, NULL)
+        if status in (-14, -20):
+            # -14 => "latitude or longitude exceeded limits"
+            # -20 => "tolerance condition error"
+            dest.u = dest.v = HUGE_VAL
+        elif status != 0:
+            raise Exception('pj_transform failed: %d\n%s' % (
+                status,
+                pj_strerrno(status)))
+
+        # NB: Not added RAD_TO_DEG yet.
+        xy.x = dest.u * RAD_TO_DEG
+        xy.y = dest.v * RAD_TO_DEG
         return xy
 
 
@@ -631,3 +683,134 @@ def project_linear(geometry not None, CRS src_crs not None,
     del lines, interpolator
     multi_line_string = shapely_from_geos(g_multi_line_string)
     return multi_line_string
+
+
+def interp_segment(p0, p1, Interpolator interp, max_len_sq, threshold):
+    cdef Point p0_p = {'x': p0[0], 'y': p0[1]}
+    cdef Point p1_p = {'x': p1[0], 'y': p1[1]}
+
+    # Take use back to the original vertex coordinates so that we can use the line
+    # interpolator for that projection.
+    cdef Point sp0 = interp.inverse(p0_p)
+    cdef Point sp1 = interp.inverse(p1_p)
+
+    print("Interpolate projected segment: {} -> {}".format(p0_p, p1_p))
+    print("                  unprojected: {} -> {}".format(sp0, sp1))
+
+    interp.set_line(sp0, sp1)
+    cdef Point t_p
+
+    cdef double uared
+
+    cdef double t_min=0, t_max=1
+    cdef double t0=0, t1=0.5
+
+    # TODO: This can be defined based on the initial length of the line.
+    cdef double t_del
+
+    cdef Point t0_p, t1_p
+    t0_p = interp.interpolate(t0)
+
+    # Shrink t until it hits a good length.
+
+    # Length squared from t0 to t1
+    cdef double l2 
+
+    points = []
+
+    # The number of iterations since t0 was last changed.
+    cdef int t0_attempts = 0
+    cdef int total_segments = -1
+
+    # TODO: Symmetric algorithm.
+    while t1 < 1 and total_segments < 1000:
+        total_segments += 1
+
+        t1_p = interp.interpolate(t1)
+        l2 = (t0_p.x - t1_p.x)**2 + (t0_p.y - t1_p.y)**2
+        # TODO: What if l2 == 0
+
+        # How much longer is t1-t0 than our target?
+        frac = l2 / max_len_sq
+
+        DEBUG=True
+
+        f='3.3f'
+
+        # If the line is *really* close to the desired length (or even shorter), let's use it.
+        good = frac > 0.95
+        good = 0.5 < frac < 1.05
+
+        print(' it[{:3d}]: {} t0={:{f}}, t1={:{f}} Δt={:{f}} len^2={:{f}} ({:{f}}/{:{f}}={:{f}}) count(✓)={} t0_attempts={}'.format(
+            total_segments, '✓' if good else 'x',t0, t1, t1-t0, l2, l2, max_len_sq, frac, len(points), t0_attempts, f=f))
+
+        # We know what the last delta was, and we know roughly how wrong we were, so
+        # let's correct the delta based on that knowledge.
+        t_del = (t1-t0) / sqrt(frac)
+        if not good:
+            # Bring t back some.
+            t1 = t0 + t_del
+            t0_attempts += 1
+
+            if t0_attempts > 3:
+                # We are likely to have hit a cut point. Skip this position (cuts are not designed to be handled in this interpolator)
+                t_del = 0.05
+                t0 += t_del
+                t0_p = interp.interpolate(t0)
+                t1 = t0 + t_del
+                t0_attempts = 0
+                
+        else:
+            # Assume that the next segment is going to be close to the same length as the previous ( with a 20% margin to allow for fairly rapid growth).
+            # Worst case is that this assumption produces *lots* of points where there are significant stretches of the source CRS in the dest projection (e.g. PC->Stereo).
+#            t_del = (t1 - t0) * max_len_sq/l2
+            #t_del = (t1-t0) * sqrt(frac) 
+            t0 = t1
+            t0_p = interp.interpolate(t0)
+            t1 = t1 + t_del
+            points.append([t1_p.x, t1_p.y])
+            t0_attempts = 0
+
+    return [p0] + points + [p1]
+
+def interp_path(path, max_length, CRS source, dest):
+    """
+    Given the path, interpolate to the given length.
+
+    Parameters
+    ==========
+
+    max_length: float
+        The maximum length desired for each segment in destination coordinate system units.
+        Note: In situations where cuts would have occured at a higher ``threshold`` it is possible
+        that segments lengths will be longer than max_length.
+    threshold: float
+        The threshold that was used to cut the original path.
+
+    NOTE: No cutting takes place in this algorithm - it is intended to be called after a cut operation has taken place (via project_linear).
+    Assumes that the path has a single MOVETO and is made up of LINETO and MOVETO only.
+
+    NOTE: Dest projection **MUST** define an inverse.
+
+    """
+    verts = path.vertices
+    assert verts.shape[0] > 1
+
+    cdef CRS src_crs = source
+    cdef CRS dest_projection = dest
+
+    cdef Interpolator interpolator
+    if src_crs.is_geodetic():
+        interpolator = SphericalInterpolator()
+    else:
+        interpolator = CartesianInterpolator()
+    interpolator.init(src_crs.proj4, (<CRS>dest_projection).proj4)
+
+    threshold = dest_projection.threshold
+    cdef double max_l2 = max_length**2
+    new_verts = []
+    for i in range(1, verts.shape[0]):
+        new_verts.extend(interp_segment(verts[i-1, :], verts[i, :], interpolator, max_l2, threshold))
+    import matplotlib.path as mpath
+    return mpath.Path(new_verts)
+
