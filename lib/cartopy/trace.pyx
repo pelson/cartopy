@@ -685,9 +685,11 @@ def project_linear(geometry not None, CRS src_crs not None,
     return multi_line_string
 
 
-def interp_segment(p0, p1, Interpolator interp, max_len_sq, threshold):
-    cdef Point p0_p = {'x': p0[0], 'y': p0[1]}
-    cdef Point p1_p = {'x': p1[0], 'y': p1[1]}
+cdef interp_segment(const Point p0, const Point p1, Interpolator interp, double max_len_sq, double threshold, const GEOSContextHandle_t handle, const GEOSPreparedGeometry* gp_domain):
+    #    cdef Point p0_p = {'x': p0[0], 'y': p0[1]}
+    #    cdef Point p1_p = {'x': p1[0], 'y': p1[1]}
+    cdef p0_p = p0
+    cdef p1_p = p1
 
     # Take use back to the original vertex coordinates so that we can use the line
     # interpolator for that projection.
@@ -721,6 +723,7 @@ def interp_segment(p0, p1, Interpolator interp, max_len_sq, threshold):
     # The number of iterations since t0 was last changed.
     cdef int t0_attempts = 0
     cdef int total_segments = -1
+    cdef bool valid
 
     # TODO: Symmetric algorithm.
     while t1 < 1 and total_segments < 1000:
@@ -744,21 +747,35 @@ def interp_segment(p0, p1, Interpolator interp, max_len_sq, threshold):
         print(' it[{:3d}]: {} t0={:{f}}, t1={:{f}} Δt={:{f}} len^2={:{f}} ({:{f}}/{:{f}}={:{f}}) count(✓)={} t0_attempts={}'.format(
             total_segments, '✓' if good else 'x',t0, t1, t1-t0, l2, l2, max_len_sq, frac, len(points), t0_attempts, f=f))
 
-        # We know what the last delta was, and we know roughly how wrong we were, so
-        # let's correct the delta based on that knowledge.
-        t_del = (t1-t0) / sqrt(frac)
+        if not good and t0_attempts > 3:
+            # We are likely to have hit a cut point. Skip this position (cuts are not designed to be handled in this interpolator)
+#            t1 += 0.05
+            #t0 += t_del
+            #t0_p = interp.interpolate(t0)
+            #t1 = t0 + t_del
+
+            valid = straightAndDomain(t0, t0_p, t1, t1_p,
+                                      interp, threshold,
+                                      handle, gp_domain, True)
+
+            #print(threshold)
+            #t0_attempts = 0
+            if valid:
+                print("DO SOMETHING! We have a line, but it may be too long...")
+                t0_attempts = 0
+                good = True
+            else:
+                t_del += 0.05
+        else:
+            # We know what the last delta was, and we know roughly how wrong we were, so
+            # let's correct the delta based on that knowledge.
+            t_del = (t1-t0) / sqrt(frac)
+
         if not good:
             # Bring t back some.
             t1 = t0 + t_del
             t0_attempts += 1
 
-            if t0_attempts > 3:
-                # We are likely to have hit a cut point. Skip this position (cuts are not designed to be handled in this interpolator)
-                t_del = 0.05
-                t0 += t_del
-                t0_p = interp.interpolate(t0)
-                t1 = t0 + t_del
-                t0_attempts = 0
                 
         else:
             # Assume that the next segment is going to be close to the same length as the previous ( with a 20% margin to allow for fairly rapid growth).
@@ -768,10 +785,11 @@ def interp_segment(p0, p1, Interpolator interp, max_len_sq, threshold):
             t0 = t1
             t0_p = interp.interpolate(t0)
             t1 = t1 + t_del
-            points.append([t1_p.x, t1_p.y])
+            points.append(t1_p)
             t0_attempts = 0
 
     return [p0] + points + [p1]
+
 
 def interp_path(path, max_length, CRS source, dest):
     """
@@ -808,9 +826,21 @@ def interp_path(path, max_length, CRS source, dest):
 
     threshold = dest_projection.threshold
     cdef double max_l2 = max_length**2
+
+    cdef:
+        GEOSContextHandle_t handle = get_geos_context_handle()
+        GEOSGeometry *g_domain
+        const GEOSPreparedGeometry *gp_domain
+        Point p0, p1
+    g_domain = geos_from_shapely(dest_projection.domain)
+    gp_domain = GEOSPrepare_r(handle, g_domain)
+
     new_verts = []
     for i in range(1, verts.shape[0]):
-        new_verts.extend(interp_segment(verts[i-1, :], verts[i, :], interpolator, max_l2, threshold))
+        p0 = {'x': verts[i-1, 0], 'y': verts[i-1, 1]}
+        p1 = {'x': verts[i, 0], 'y': verts[i, 1]}
+        v = interp_segment(p0, p1, interpolator, max_l2, threshold, handle, gp_domain)
+        new_verts.extend(v)
     import matplotlib.path as mpath
-    return mpath.Path(new_verts)
+    return mpath.Path([[v['x'], v['y']] for v in new_verts])
 

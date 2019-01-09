@@ -25,7 +25,7 @@ rp = proj
 proj_gl = proj #ccrs.Robinson(0)
 proj = CoarsePC() #ccrs.PlateCarree(central_longitude=0)
 coarse = CoarsePC()
-fine_coarse = ccrs.PlateCarree()
+fine = ccrs.PlateCarree()
 
 
 ax = plt.axes(projection=proj)
@@ -49,7 +49,7 @@ rp_verts = np.concatenate([[rp.transform_point(*pt, ccrs.Geodetic())] for pt in 
 geom = sgeom.LineString(rp_verts)
 
 coarse_proj = coarse.project_geometry(geom, rp)
-fine_proj = fine_coarse.project_geometry(geom, rp)
+fine_proj = fine.project_geometry(geom, rp)
 
 # There should be fewer geometries when we have a coarse projection.
 assert len(coarse_proj.geoms) < len(fine_proj.geoms)
@@ -60,18 +60,28 @@ assert len(coarse_proj.geoms) == 1
 # The simplest reprojection of this line does not require cutting, but if you go finer, you will need to cut it.
 line_verts = np.concatenate([[ax.projection.transform_point(*pt, ccrs.Geodetic())] for pt in verts])
 
-import shapely.geometry as sgeom
 l = mpath.Path(line_verts)
 
-if True:
-    print(l)
-    # The resolution in length of target projection units.
-    l = cartopy.trace.interp_path(l, max_length=target_len, source=rp, dest=coarse)
+import cartopy.mpl.patch
 
+for l in cartopy.mpl.patch.geos_to_path(coarse_proj):
+    # If you lie about the destination that was projected to, you risk getting horrific wrap-arounds.
+    l = cartopy.trace.interp_path(l, max_length=target_len, source=rp, dest=fine)
+    print(l.vertices)
+#    assert l.vertices[:, 0].max() > 0
+
+    # The data is in ax.projection coordinates, but we want to interpolate it in source's reference system.
+    l = cartopy.trace.interp_path(l, max_length=target_len, source=rp, dest=coarse)
+    print(l.vertices)
+
+    assert l.vertices[:, 0].max() < 0
+
+    # The data is in ax.projection coordinates.
     p = mpatches.PathPatch(l, facecolor='none', edgecolor='red', lw=10, transform=ax.transData)
     ax.add_patch(p)
+
 #    ax.plot(line_verts[:, 0], line_verts[:, 1], transform=ax.transData, color='yellow', lw=1)
-    ax.plot(rp_verts[:, 0], rp_verts[:, 1], transform=rp, color='blue', lw=4)
+    ax.plot(verts[:, 0], verts[:, 1], transform=ax.transData, color='blue', lw=4)
 
 #ax.set_global()
 ax.coastlines()
